@@ -38,5 +38,6 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 <!-- LATEST_TAGS_START -->
 | Action | Latest version tag | Latest pointer |
 | ------ | ------------------- | -------------- |
-| (populated by release workflow) |  |  |
+| check-semver | (none) | check-semver/latest |
+| docker-build | (none) | docker-build/latest |
 <!-- LATEST_TAGS_END -->
