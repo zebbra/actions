@@ -39,5 +39,5 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 | Action | Latest version | Documentation |
 | ------ | -------------- | ------------- |
 | check-semver | (none) | (n/a) |
-| docker-build | (none) | (n/a) |
+| docker-build | [docker-build/v0](docs/docker-build/v0.md) | [Documentation](docs/docker-build/v0.md) |
 <!-- LATEST_TAGS_END -->
