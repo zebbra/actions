@@ -12,14 +12,14 @@ steps:
   - uses: actions/checkout@v4
 
   - name: Build image (no push)
-    uses: zebbra/actions/.github/actions/docker-build@docker-build/v0
+    uses: zebbra/actions/.github/actions/docker-build@docker-build/v1
     with:
       image_name: ghcr.io/zebbra/my-service
       context: .
       push: false
 
   - name: Check SemVer
-    uses: zebbra/actions/.github/actions/check-semver@check-semver/v0
+    uses: zebbra/actions/.github/actions/check-semver@check-semver/v1
 ```
 
 Notes:
@@ -34,10 +34,10 @@ Manual only:
 
 Each release creates `<action>/vN` and moves `<action>/latest`.
 
-## Latest tags
+## Latest versions
 <!-- LATEST_TAGS_START -->
-| Action | Latest version tag | Latest pointer |
-| ------ | ------------------- | -------------- |
-| check-semver | (none) | check-semver/latest |
-| docker-build | (none) | docker-build/latest |
+| Action | Latest version |
+| ------ | -------------- |
+| check-semver | (none) |
+| docker-build | (none) |
 <!-- LATEST_TAGS_END -->

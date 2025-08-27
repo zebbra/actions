@@ -92,9 +92,9 @@ jobs:
             exit 1
           fi
 
-          echo "Releasing $action/$next at $GITHUB_SHA"
-          git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
-          git push origin "$action/$next"
+            echo "Releasing $action/$next at $GITHUB_SHA"
+            git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
+            git push origin "$action/$next"
 
           # Move latest pointer
           if git rev-parse -q --verify "refs/tags/$action/latest" >/dev/null; then
@@ -104,25 +104,48 @@ jobs:
           fi
           git push origin --force "$action/latest"
 
+      - name: Generate versioned docs for action
+        shell: bash
+        run: |
+          set -euo pipefail
+          action="${{ steps.select.outputs.action }}"
+          ver="${{ steps.select.outputs.next_version }}"
+          if [ -z "$ver" ]; then
+            highest=$(git tag --list "$action/v*" | sed -E "s#^$action/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            ver="v${highest:-0}"
+          fi
+          python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
+          python3 -m pip install pyyaml >/dev/null 2>&1
+          python3 scripts/generate_action_docs.py "$action" "$ver"
+
       - name: Update README latest tags table
         shell: bash
         run: |
           set -euo pipefail
+          # Ensure local view has all tags just pushed
+          git fetch --tags --force || true
           # Build table
           mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
           tmpfile=$(mktemp)
           {
-            echo "| Action | Latest version tag | Latest pointer |"
-            echo "| ------ | ------------------- | -------------- |"
+            echo "| Action | Latest version | Documentation |"
+            echo "| ------ | -------------- | ------------- |"
             for a in "${actions[@]}"; do
+              echo "::group::Tag scan for $a"
+              echo "All tags for $a:" && git tag --list "$a/*" || true
               highest=$(git tag --list "$a/v*" | sed -E "s#^$a/v([0-9]+)$#\\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+              echo "Highest numeric for $a: ${highest:-<none>}"
               if [ -n "$highest" ]; then
                 ver="${a}/v${highest}"
+                doc_link="docs/${a}/v${highest}.md"
+                ver_cell="[${ver}](${doc_link})"
+                docs_cell="[Documentation](${doc_link})"
               else
-                ver="(none)"
+                ver_cell="(none)"
+                docs_cell="(n/a)"
               fi
-              latest="${a}/latest"
-              echo "| $a | $ver | $latest |"
+              echo "| $a | $ver_cell | $docs_cell |"
+              echo "::endgroup::"
             done
           } > "$tmpfile"
 
@@ -130,7 +153,7 @@ jobs:
           end='<!-- LATEST_TAGS_END -->'
           if ! grep -q "$start" README.md; then
             {
-              printf "\n## Latest tags\n"
+              printf "\n## Latest versions\n"
               printf "%s\n" "$start"
               cat "$tmpfile"
               printf "%s\n" "$end"
@@ -145,17 +168,17 @@ jobs:
             mv README.md.new README.md
           fi
 
-      - name: Commit README update
+      - name: Commit README and docs updates
         env:
           SELECTED_ACTION: ${{ steps.select.outputs.action }}
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- README.md; then
+          git add README.md docs || true
+          if git diff --cached --quiet; then
             echo "No README changes to commit"
             exit 0
           fi
-          git add README.md
-          git commit -m "docs(readme): refresh Latest tags after releasing ${SELECTED_ACTION}"
+          git commit -m "docs(${SELECTED_ACTION}): add ${SELECTED_ACTION} docs and refresh Latest tags/index"
           git push
 
