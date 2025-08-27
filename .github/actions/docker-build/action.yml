@@ -1,0 +1,201 @@
+name: Docker build (cached, generic)
+description: Build/push Docker image with GHA cache, generic tagging and labels
+
+inputs:
+  image_name:
+    description: Fully qualified image name to tag/push (e.g., quay.io/org/app)
+    required: true
+  context:
+    description: Build context
+    default: .
+  file:
+    description: Dockerfile path
+    default: ./Dockerfile
+  target:
+    description: Optional Docker build target (multi-stage target name)
+    required: false
+  platforms:
+    description: Optional platforms (comma-separated) for multi-arch builds
+    required: false
+  push_on_branches:
+    description: Comma-separated list of branch names that are allowed to push. Ignored if 'push' is true.
+    default: main,develop
+  push:
+    description: Force push regardless of branch rules (true/false). If 'true', overrides 'push_on_branches'.
+    required: false
+  include_tag_sha:
+    description: Include a tag based on the commit SHA (true/false)
+    default: 'true'
+  include_tag_ref:
+    description: Include a tag based on the branch/ref (true/false)
+    default: 'true'
+  tag_latest_branch:
+    description: Branch name that should produce the 'latest' tag
+    default: main
+  tag_latest_name:
+    description: Exact tag to use when on 'tag_latest_branch'
+    default: latest
+  tag_nightly_branch:
+    description: Branch name that should produce a nightly tag
+    default: develop
+  tag_nightly_name:
+    description: Exact tag to use when on 'tag_nightly_branch'
+    default: nightly
+  tag_custom:
+    description: Additional docker/metadata-action tag lines (multiline), appended verbatim
+    required: false
+  description:
+    description: Value for org.opencontainers.image.description label
+    required: false
+  extra_labels:
+    description: Extra labels (multiline key=value), appended verbatim
+    required: false
+  build_args:
+    description: Additional build-args (multiline KEY=VALUE), appended verbatim
+    required: false
+  build_arg_name_for_version:
+    description: If set, injects the computed 'version' into build-args as NAME=VALUE
+    required: false
+  version:
+    description: Version to inject (if 'build_arg_name_for_version' is set). Defaults to the current branch name.
+    required: false
+  cache_from_overrides:
+    description: Override cache-from lines (multiline). If set, skips 'smart_cache'.
+    required: false
+  cache_write_scope:
+    description: Scope name for cache-to (defaults to current branch). Use to control where cache is written.
+    required: false
+  smart_cache:
+    description: Enable smart cache-from heuristic (head, base, develop, main). Ignored if 'cache_from_overrides' is provided.
+    default: 'true'
+  secrets:
+    description: Additional BuildKit secrets lines (multiline)
+    required: false
+
+outputs:
+  tags:
+    description: Generated Docker image tags
+    value: ${{ steps.meta.outputs.tags }}
+  digest:
+    description: Image digest
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Determine cache branches
+      id: branches
+      shell: bash
+      run: |
+        HEAD_BRANCH_RAW="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+        BASE_BRANCH_RAW="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+        HEAD_BRANCH="${HEAD_BRANCH_RAW////-}"
+        BASE_BRANCH="${BASE_BRANCH_RAW////-}"
+        echo "head=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
+        echo "base=${BASE_BRANCH}" >> "$GITHUB_OUTPUT"
+
+    - name: Compute Docker cache-from
+      id: cache_from
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.cache_from_overrides }}" ]; then
+          # Use overrides exactly as provided
+          {
+            echo "cache_from<<EOF"
+            echo "${{ inputs.cache_from_overrides }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "${{ inputs.smart_cache }}" != "true" ]; then
+          {
+            echo "cache_from<<EOF"
+            echo "type=gha,scope=develop"
+            echo "type=gha,scope=main"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        HEAD='${{ steps.branches.outputs.head }}'
+        BASE='${{ steps.branches.outputs.base }}'
+        if [ "$HEAD" = "main" ]; then
+          echo "cache_from=type=gha,scope=main" >> "$GITHUB_OUTPUT"
+        elif [ "$HEAD" = "develop" ]; then
+          {
+            echo "cache_from<<EOF"
+            echo "type=gha,scope=develop"
+            echo "type=gha,scope=main"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        else
+          {
+            echo "cache_from<<EOF"
+            echo "type=gha,scope=${HEAD}"
+            if [ "$BASE" != "$HEAD" ]; then echo "type=gha,scope=${BASE}"; fi
+            echo "type=gha,scope=develop"
+            echo "type=gha,scope=main"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Compute push and version
+      id: cfg
+      shell: bash
+      run: |
+        HEAD='${{ steps.branches.outputs.head }}'
+        PUSH=false
+        if [ "${{ inputs.push }}" = "true" ]; then
+          PUSH=true
+        else
+          BRANCH_LIST='${{ inputs.push_on_branches }}'
+          IFS=',' read -ra BRANCHES <<< "$BRANCH_LIST"
+          for b in "${BRANCHES[@]}"; do
+            if [ "$HEAD" = "${b}" ]; then PUSH=true; fi
+          done
+        fi
+        VERSION='${{ inputs.version }}'
+        if [ -z "$VERSION" ]; then VERSION="$HEAD"; fi
+        echo "push=${PUSH}" >> "$GITHUB_OUTPUT"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Docker meta (tags & labels)
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ inputs.image_name }}
+        tags: |
+          type=sha,enable=${{ inputs.include_tag_sha == 'true' }}
+          type=ref,event=branch,enable=${{ inputs.include_tag_ref == 'true' }}
+          type=raw,value=${{ inputs.tag_latest_name }},enable=${{ steps.branches.outputs.head == inputs.tag_latest_branch }}
+          type=raw,value=${{ inputs.tag_nightly_name }},enable=${{ steps.branches.outputs.head == inputs.tag_nightly_branch }}
+          ${{ inputs.tag_custom }}
+        labels: |
+          ${{ inputs.description != '' && format('org.opencontainers.image.description={0}', inputs.description) || '' }}
+          ${{ inputs.extra_labels }}
+          quay.expires-after=20d
+
+
+    - name: Build (and maybe push)
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file }}
+        target: ${{ inputs.target }}
+        platforms: ${{ inputs.platforms }}
+        push: ${{ steps.cfg.outputs.push == 'true' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: ${{ steps.cache_from.outputs.cache_from }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.cache_write_scope != '' && inputs.cache_write_scope || steps.branches.outputs.head }}
+        provenance: false
+        build-args: |
+          ${{ inputs.build_args }}
+          ${{ inputs.build_arg_name_for_version != '' && format('{0}={1}', inputs.build_arg_name_for_version, steps.cfg.outputs.version) || '' }}
+        secrets: |
+          ${{ inputs.secrets }}
+
+

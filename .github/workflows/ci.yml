@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/**'
+      - '.github/workflows/**'
+      - 'README.md'
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.7.7
+          curl -fsSL -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          sudo mv actionlint /usr/local/bin/
+
+      - name: Lint workflows (actionlint)
+        shell: bash
+        run: actionlint
+
+      - name: Detect changed actions
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$GITHUB_SHA^"; head="$GITHUB_SHA"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          fi
+          files=$(git diff --name-only "$base" "$head")
+          changed=$(awk '/^.github\/actions\//{split($0,a,"/"); if (a[3] != "") print a[3]; }' <<<"$files" | sort -u | paste -sd' ' -)
+          echo "actions=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Validate composite action metadata (basic)
+        if: steps.changed.outputs.actions != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for a in ${{ steps.changed.outputs.actions }}; do
+            file=".github/actions/$a/action.yml"
+            if [ ! -f "$file" ]; then
+              echo "Missing $file" >&2
+              exit 1
+            fi
+            # Minimal schema presence checks for composite/docker actions
+            if ! grep -q '^runs:' "$file"; then
+              echo "Missing 'runs' in $file" >&2
+              exit 1
+            fi
+            if ! grep -q 'using:' "$file"; then
+              echo "Missing 'runs.using' in $file" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build docker-based actions
+        if: steps.changed.outputs.actions != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for a in ${{ steps.changed.outputs.actions }}; do
+            if [ -f ".github/actions/$a/Dockerfile" ]; then
+              echo "Building .github/actions/$a"
+              docker build ".github/actions/$a" -t test/$a:ci
+            else
+              echo "Skipping docker build for $a (no Dockerfile)"
+            fi
+          done
+

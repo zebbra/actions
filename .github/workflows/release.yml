@@ -1,0 +1,161 @@
+name: Release actions
+
+on:
+  workflow_dispatch:
+    inputs:
+      action_name:
+        description: Action directory name under .github/actions (e.g., docker-build)
+        required: true
+      version:
+        description: Optional version to release (format vN, e.g., v3). If omitted, next integer is derived
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover actions
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          if [ ${#actions[@]} -eq 0 ]; then
+            echo 'No actions found under .github/actions' >&2
+            exit 1
+          fi
+          printf 'found=%s\n' "${actions[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Select action and version (manual)
+        id: select
+        env:
+          INPUT_ACTION: ${{ github.event.inputs.action_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          FOUND: ${{ steps.discover.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=' ' read -r -a discovered <<< "$FOUND"
+          action="$INPUT_ACTION"
+          if [ -z "$action" ]; then
+            echo 'action_name is required' >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "${discovered[@]}" | grep -qx "$action"; then
+            echo "Unknown action: $action" >&2
+            echo "Known actions: ${discovered[*]}" >&2
+            exit 1
+          fi
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo "next_version=${INPUT_VERSION:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute and create tags
+        env:
+          SELECTED_ACTION: ${{ steps.select.outputs.action }}
+          NEXT_VERSION: ${{ steps.select.outputs.next_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+          action="$SELECTED_ACTION"
+
+          # Derive next version if not provided
+          next=""
+          if [ -n "${NEXT_VERSION:-}" ]; then
+            if [[ ! "$NEXT_VERSION" =~ ^v[0-9]+$ ]]; then
+              echo "Invalid manual version: $NEXT_VERSION (expected vN)" >&2
+              exit 1
+            fi
+            next="$NEXT_VERSION"
+          else
+            highest=$(git tag --list "$action/v*" | sed -E "s#^$action/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            if [ -z "$highest" ]; then
+              next="v0"
+            else
+              next="v$((highest + 1))"
+            fi
+          fi
+
+          # If tag exists, fail to avoid overwriting
+          if git rev-parse -q --verify "refs/tags/$action/$next" >/dev/null; then
+            echo "Tag already exists: $action/$next" >&2
+            exit 1
+          fi
+
+          echo "Releasing $action/$next at $GITHUB_SHA"
+          git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
+          git push origin "$action/$next"
+
+          # Move latest pointer
+          if git rev-parse -q --verify "refs/tags/$action/latest" >/dev/null; then
+            git tag -fa "$action/latest" -m "Move $action/latest -> $GITHUB_SHA" "$GITHUB_SHA"
+          else
+            git tag -a "$action/latest" -m "Create $action/latest at $GITHUB_SHA" "$GITHUB_SHA"
+          fi
+          git push origin --force "$action/latest"
+
+      - name: Update README latest tags table
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build table
+          mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          tmpfile=$(mktemp)
+          {
+            echo "| Action | Latest version tag | Latest pointer |"
+            echo "| ------ | ------------------- | -------------- |"
+            for a in "${actions[@]}"; do
+              highest=$(git tag --list "$a/v*" | sed -E "s#^$a/v([0-9]+)$#\\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+              if [ -n "$highest" ]; then
+                ver="${a}/v${highest}"
+              else
+                ver="(none)"
+              fi
+              latest="${a}/latest"
+              echo "| $a | $ver | $latest |"
+            done
+          } > "$tmpfile"
+
+          start='<!-- LATEST_TAGS_START -->'
+          end='<!-- LATEST_TAGS_END -->'
+          if ! grep -q "$start" README.md; then
+            {
+              printf "\n## Latest tags\n"
+              printf "%s\n" "$start"
+              cat "$tmpfile"
+              printf "%s\n" "$end"
+            } >> README.md
+          else
+            awk -v start="$start" -v end="$end" -v file="$tmpfile" '
+              BEGIN{printed=0}
+              $0==start{print;system("cat " file);skip=1;next}
+              $0==end{skip=0}
+              skip!=1{print}
+            ' README.md > README.md.new
+            mv README.md.new README.md
+          fi
+
+      - name: Commit README update
+        env:
+          SELECTED_ACTION: ${{ steps.select.outputs.action }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- README.md; then
+            echo "No README changes to commit"
+            exit 0
+          fi
+          git add README.md
+          git commit -m "docs(readme): refresh Latest tags after releasing ${SELECTED_ACTION}"
+          git push
+
