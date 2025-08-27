@@ -67,6 +67,10 @@ def render_markdown(action_name: str, version: str, data: Dict[str, Any]) -> str
             req = str(meta.get("required", False)).lower()
             default = meta.get("default", "")
             desc_i = meta.get("description", "")
+            if isinstance(desc_i, str) and ("\n" in desc_i):
+                # Normalize and join lines to avoid breaking markdown tables
+                parts = [ln.strip() for ln in desc_i.splitlines() if ln.strip()]
+                desc_i = " ".join(parts)
             name_cell = f"`{escape_pipes(key)}`"
             default_cell = f"`{escape_pipes(default)}`" if default != "" else ""
             lines.append(

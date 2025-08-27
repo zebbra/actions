@@ -127,27 +127,25 @@ jobs:
           # Build table
           mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
           tmpfile=$(mktemp)
-          {
-            echo "| Action | Latest version | Documentation |"
-            echo "| ------ | -------------- | ------------- |"
-            for a in "${actions[@]}"; do
-              echo "::group::Tag scan for $a"
-              echo "All tags for $a:" && git tag --list "$a/*" || true
-              highest=$(git tag --list "$a/v*" | sed -E "s#^$a/v([0-9]+)$#\\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
-              echo "Highest numeric for $a: ${highest:-<none>}"
-              if [ -n "$highest" ]; then
-                ver="${a}/v${highest}"
-                doc_link="docs/${a}/v${highest}.md"
-                ver_cell="[${ver}](${doc_link})"
-                docs_cell="[Documentation](${doc_link})"
-              else
-                ver_cell="(none)"
-                docs_cell="(n/a)"
-              fi
-              echo "| $a | $ver_cell | $docs_cell |"
-              echo "::endgroup::"
-            done
-          } > "$tmpfile"
+          echo "| Action | Latest version | Documentation |" > "$tmpfile"
+          echo "| ------ | -------------- | ------------- |" >> "$tmpfile"
+          for a in "${actions[@]}"; do
+            echo "::group::Tag scan for $a"
+            echo "All tags for $a:" && git tag --list "$a/*" || true
+            highest=$(git tag --list "$a/v*" | sed -E "s#^$a/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            echo "Highest numeric for $a: ${highest:-<none>}"
+            if [ -n "$highest" ]; then
+              ver="${a}/v${highest}"
+              doc_link="docs/${a}/v${highest}.md"
+              ver_cell="[${ver}](${doc_link})"
+              docs_cell="[Documentation](${doc_link})"
+            else
+              ver_cell="(none)"
+              docs_cell="(n/a)"
+            fi
+            echo "| $a | $ver_cell | $docs_cell |" >> "$tmpfile"
+            echo "::endgroup::"
+          done
 
           start='<!-- LATEST_TAGS_START -->'
           end='<!-- LATEST_TAGS_END -->'

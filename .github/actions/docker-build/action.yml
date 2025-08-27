@@ -71,9 +71,7 @@ inputs:
     default: 'true'
   secrets:
     description: |
-      Additional BuildKit secrets (one per line). Examples:
-      - id=GIT_AUTH_TOKEN,env=GITHUB_TOKEN
-      - id=mysecret,src=/path/to/file
+      Additional BuildKit secrets (one per line). Examples: `id=GIT_AUTH_TOKEN,env=GITHUB_TOKEN` or `id=mysecret,src=/path/to/file`
     required: false
 
 outputs:
