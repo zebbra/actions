@@ -38,16 +38,6 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 <!-- LATEST_TAGS_START -->
 | Action | Latest version | Documentation |
 | ------ | -------------- | ------------- |
-::group::Tag scan for check-semver
-All tags for check-semver:
-Highest numeric for check-semver: <none>
 | check-semver | (none) | (n/a) |
-::endgroup::
-::group::Tag scan for docker-build
-All tags for docker-build:
-docker-build/latest
-docker-build/v0
-Highest numeric for docker-build: <none>
 | docker-build | (none) | (n/a) |
-::endgroup::
 <!-- LATEST_TAGS_END -->
