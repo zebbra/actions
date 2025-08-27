@@ -29,7 +29,7 @@ Notes:
 ## Releasing
 
 Manual only:
-- Run the "Release actions" workflow and choose an action.
+- Run the `Release actions` workflow and choose an action.
 - Provide `version` like `v3` to set explicitly, or leave empty to auto-derive the next integer (starts at `v0`).
 
 Each release creates `<action>/vN` and moves `<action>/latest`.

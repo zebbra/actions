@@ -131,8 +131,10 @@ jobs:
           echo "| ------ | -------------- | ------------- |" >> "$tmpfile"
           for a in "${actions[@]}"; do
             echo "::group::Tag scan for $a"
-            echo "All tags for $a:" && git tag --list "$a/*" || true
-            highest=$(git tag --list "$a/v*" | sed -E "s#^$a/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            all_tags=$(git tag --list "$a/*" | tr -d '\r' || true)
+            echo "All tags for $a:" && printf '%s\n' "$all_tags"
+            numeric=$(printf '%s\n' "$all_tags" | awk -F'/' '$2 ~ /^v[0-9]+$/ {print $2}' | sed -E 's/^v([0-9]+)$/\1/' | sort -n || true)
+            highest=$(printf '%s\n' "$numeric" | tail -1)
             echo "Highest numeric for $a: ${highest:-<none>}"
             if [ -n "$highest" ]; then
               ver="${a}/v${highest}"
