@@ -38,6 +38,6 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 <!-- LATEST_TAGS_START -->
 | Action | Latest version | Documentation |
 | ------ | -------------- | ------------- |
-| check-semver | (none) | (n/a) |
+| check-semver | [check-semver/v0](docs/check-semver/v0.md) | [Documentation](docs/check-semver/v0.md) |
 | docker-build | [docker-build/v0](docs/docker-build/v0.md) | [Documentation](docs/docker-build/v0.md) |
 <!-- LATEST_TAGS_END -->
