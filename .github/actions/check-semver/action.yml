@@ -2,5 +2,22 @@ name: "Check SemVer on Branch"
 description: "A GitHub Action that checks SemVer integrity on a branch"
 author: "Zebbra AG"
 runs:
-  using: "docker"
-  image: "Dockerfile"
+  using: composite
+  steps:
+    - name: Checkout repository (full history)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Python dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Check semver integrity
+      shell: bash
+      run: python "${{ github.action_path }}/check-semver.py"
