@@ -3,7 +3,8 @@
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+import subprocess
 
 try:
     import yaml  # type: ignore
@@ -25,7 +26,12 @@ def load_action_yaml(action_name: str) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def render_markdown(action_name: str, version: str, data: Dict[str, Any]) -> str:
+def render_markdown(
+    action_name: str,
+    version: str,
+    data: Dict[str, Any],
+    repo_web_base: Optional[str] = None,
+) -> str:
     name = data.get("name", action_name)
     desc = data.get("description", "")
     runs = data.get("runs", {}) or {}
@@ -96,10 +102,16 @@ def render_markdown(action_name: str, version: str, data: Dict[str, Any]) -> str
     lines.append("")
     lines.append("## Technical")
     lines.append(f"- runs.using: `{using}`")
-    action_rel = f"../../.github/actions/{action_name}/action.yml"
-    lines.append(
-        f"- action path: [.github/actions/{action_name}/action.yml]({action_rel})"
-    )
+    if repo_web_base:
+        action_web = f"{repo_web_base}/blob/{action_name}/{version}/.github/actions/{action_name}/action.yml"
+        lines.append(
+            f"- action path: [.github/actions/{action_name}/action.yml]({action_web})"
+        )
+    else:
+        action_rel = f"../../.github/actions/{action_name}/action.yml"
+        lines.append(
+            f"- action path: [.github/actions/{action_name}/action.yml]({action_rel})"
+        )
 
     # Referenced actions
     lines.append("")
@@ -122,8 +134,15 @@ def render_markdown(action_name: str, version: str, data: Dict[str, Any]) -> str
     if action_root.exists():
         for p in sorted(action_root.rglob("*")):
             if p.is_file():
-                rel_link = Path("../../") / p
-                file_paths.append((str(p), str(rel_link)))
+                if repo_web_base:
+                    repo_path = p.as_posix()
+                    web_link = (
+                        f"{repo_web_base}/blob/{action_name}/{version}/{repo_path}"
+                    )
+                    file_paths.append((str(p), web_link))
+                else:
+                    rel_link = Path("../../") / p
+                    file_paths.append((str(p), str(rel_link)))
     if file_paths:
         for display, link in file_paths:
             lines.append(f"- [{display}]({link})")
@@ -164,7 +183,29 @@ def main() -> int:
     version = sys.argv[2]
 
     data = load_action_yaml(action)
-    content = render_markdown(action, version, data)
+
+    # Determine repository web base (e.g., https://github.com/<owner>/<repo>) from git remote
+    repo_web_base: Optional[str] = None
+    try:
+        remote_url = subprocess.check_output(
+            ["git", "config", "--get", "remote.origin.url"], text=True
+        ).strip()
+        if remote_url:
+            if remote_url.startswith("git@github.com:"):
+                path = remote_url[len("git@github.com:") :]
+                if path.endswith(".git"):
+                    path = path[:-4]
+                repo_web_base = f"https://github.com/{path}"
+            elif "github.com/" in remote_url:
+                # Handles https://github.com/<owner>/<repo>[.git]
+                path = remote_url.split("github.com/")[-1]
+                if path.endswith(".git"):
+                    path = path[:-4]
+                repo_web_base = f"https://github.com/{path}"
+    except Exception:
+        repo_web_base = None
+
+    content = render_markdown(action, version, data, repo_web_base)
 
     out_dir = Path("docs") / action
     out_dir.mkdir(parents=True, exist_ok=True)
