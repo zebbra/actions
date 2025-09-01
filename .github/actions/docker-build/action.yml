@@ -37,25 +37,25 @@ inputs:
     description: |
       Additional docker/metadata-action tag rules (multiline). Appended verbatim to the metadata-action `tags` input.
       Examples:
-        type=raw,value=1.2.3
-        type=raw,value=one-tag-to-rule-them-all
-        type=semver,pattern={{major}}.{{minor}}
+        `type=raw,value=1.2.3`
+        `type=raw,value=one-tag-to-rule-them-all`
+        `type=semver,pattern={{major}}.{{minor}}`
   description:
-    description: Value for org.opencontainers.image.description label
+    description: Value for `org.opencontainers.image.description` label
   extra_labels:
-    description: Extra labels (multiline key=value), appended verbatim
+    description: Extra labels (multiline `key=value`), appended verbatim
   build_args:
-    description: Additional build-args (multiline KEY=VALUE), appended verbatim
+    description: Additional build-args (multiline `KEY=VALUE`), appended verbatim
   build_arg_name_for_version:
-    description: If set, injects the computed `version` into build-args as NAME=VALUE
+    description: If set, injects the computed `version` into `build-args` as `NAME=VALUE`
   version:
     description: Version to inject (if `build_arg_name_for_version` is set). Defaults to the current branch name.
   cache_from_overrides:
-    description: Override cache-from lines (multiline). If set, skips `smart_cache`.
+    description: Override `cache-from` lines (multiline). If set, skips `smart_cache`.
   cache_write_scope:
-    description: Scope name for cache-to (defaults to current branch). Use to control where cache is written.
+    description: Scope name for `cache-to` (defaults to current branch). Use to control where cache is written.
   smart_cache:
-    description: Enable smart cache-from heuristic (head, base, develop, main). Ignored if `cache_from_overrides` is provided.
+    description: Enable smart `cache-from` heuristic (head, base, develop, main). Ignored if `cache_from_overrides` is provided.
     default: 'true'
   secrets:
     description: |
