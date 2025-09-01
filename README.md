@@ -37,5 +37,5 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 | Action | Latest version | Documentation |
 | ------ | -------------- | ------------- |
 | check-semver | [check-semver/v1](docs/check-semver/v1.md) | [Documentation](docs/check-semver/v1.md) |
-| docker-build | [docker-build/v1](docs/docker-build/v1.md) | [Documentation](docs/docker-build/v1.md) |
+| docker-build | [docker-build/v2](docs/docker-build/v2.md) | [Documentation](docs/docker-build/v2.md) |
 <!-- LATEST_TAGS_END -->
