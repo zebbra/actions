@@ -6,7 +6,7 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 # Copy the action files
-COPY Requirements.txt /app/
+COPY requirements.txt /app/
 
 # Install Python dependencies
 RUN pip install -r requirements.txt
