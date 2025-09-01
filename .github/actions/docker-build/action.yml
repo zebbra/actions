@@ -19,9 +19,12 @@ inputs:
     description: Optional platforms (comma-separated) for multi-arch builds
     required: false
   push_on_branches:
-    description: Comma-separated list of branch names that are allowed to push. Ignored if `push` is `true`.
-    default: main,develop
-  push:
+    description: |
+      Comma-separated list of branch names that are allowed to push.
+      Ignored if `force_push` is `true`.
+      Example: main,develop
+    required: false
+  force_push:
     description: Force push regardless of branch rules (`true`/`false`). If `true`, overrides `push_on_branches`.
     required: false
   include_tag_sha:
@@ -42,8 +45,13 @@ inputs:
   tag_nightly_name:
     description: Exact tag to use when on `tag_nightly_branch`
     default: nightly
-  tag_custom:
-    description: Additional docker/metadata-action tag lines (multiline), appended verbatim
+  tags:
+    description: |
+      Additional docker/metadata-action tag rules (multiline). Appended verbatim to the metadata-action `tags` input.
+      Examples:
+        type=raw,value=1.2.3
+        type=raw,value=one-tag-to-rule-them-all
+        type=semver,pattern={{major}}.{{minor}}
     required: false
   description:
     description: Value for org.opencontainers.image.description label
@@ -149,14 +157,16 @@ runs:
       run: |
         HEAD='${{ steps.branches.outputs.head }}'
         PUSH=false
-        if [ "${{ inputs.push }}" = "true" ]; then
+        if [ "${{ inputs.force_push }}" = "true" ]; then
           PUSH=true
         else
           BRANCH_LIST='${{ inputs.push_on_branches }}'
-          IFS=',' read -ra BRANCHES <<< "$BRANCH_LIST"
-          for b in "${BRANCHES[@]}"; do
-            if [ "$HEAD" = "${b}" ]; then PUSH=true; fi
-          done
+          if [ -n "$BRANCH_LIST" ]; then
+            IFS=',' read -ra BRANCHES <<< "$BRANCH_LIST"
+            for b in "${BRANCHES[@]}"; do
+              if [ "$HEAD" = "${b}" ]; then PUSH=true; fi
+            done
+          fi
         fi
         VERSION='${{ inputs.version }}'
         if [ -z "$VERSION" ]; then VERSION="$HEAD"; fi
@@ -173,7 +183,7 @@ runs:
           type=ref,event=branch,enable=${{ inputs.include_tag_ref == 'true' }}
           type=raw,value=${{ inputs.tag_latest_name }},enable=${{ steps.branches.outputs.head == inputs.tag_latest_branch }}
           type=raw,value=${{ inputs.tag_nightly_name }},enable=${{ steps.branches.outputs.head == inputs.tag_nightly_branch }}
-          ${{ inputs.tag_custom }}
+          ${{ inputs.tags }}
         labels: |
           ${{ inputs.description != '' && format('org.opencontainers.image.description={0}', inputs.description) || '' }}
           ${{ inputs.extra_labels }}
