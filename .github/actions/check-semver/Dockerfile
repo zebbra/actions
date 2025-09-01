@@ -9,7 +9,7 @@ WORKDIR /app
 COPY Requirements.txt /app/
 
 # Install Python dependencies
-RUN pip install -r Requirements.txt
+RUN pip install -r requirements.txt
 
 # Copy script
 COPY check-semver.py /app/
