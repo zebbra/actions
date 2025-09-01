@@ -14,37 +14,25 @@ inputs:
     default: ./Dockerfile
   target:
     description: Optional Docker build target (multi-stage target name)
-    required: false
   platforms:
     description: Optional platforms (comma-separated) for multi-arch builds
-    required: false
-  push_on_branches:
+  push:
     description: |
-      Comma-separated list of branch names that are allowed to push.
-      Ignored if `force_push` is `true`.
-      Example: main,develop
-    required: false
-  force_push:
-    description: Force push regardless of branch rules (`true`/`false`). If `true`, overrides `push_on_branches`.
-    required: false
+      Push the built image to the registry (`true`/`false`).
+      Requires at least one tag to be enabled/provided (e.g., `include_tag_sha`, `include_tag_ref`, `latest_tag_on_main_push`, `nightly_tag_on_develop_push`, or `tags`).
+    default: 'false'
   include_tag_sha:
-    description: Include a tag based on the commit SHA (`true`/`false`)
-    default: 'true'
+    description: Include a tag based on the commit SHA (`true`/`false`).
+    default: 'false'
   include_tag_ref:
-    description: Include a tag based on the branch/ref (`true`/`false`)
-    default: 'true'
-  tag_latest_branch:
-    description: Branch name that should produce the `latest` tag
-    default: main
-  tag_latest_name:
-    description: Exact tag to use when on `tag_latest_branch`
-    default: latest
-  tag_nightly_branch:
-    description: Branch name that should produce a `nightly` tag
-    default: develop
-  tag_nightly_name:
-    description: Exact tag to use when on `tag_nightly_branch`
-    default: nightly
+    description: Include a tag based on the branch name (`true`/`false`).
+    default: 'false'
+  latest_tag_on_main_push:
+    description: Add `latest` tag when pushing from `main` (`true`/`false`).
+    default: 'false'
+  nightly_tag_on_develop_push:
+    description: Add `nightly` tag when pushing from `develop` (`true`/`false`).
+    default: 'false'
   tags:
     description: |
       Additional docker/metadata-action tag rules (multiline). Appended verbatim to the metadata-action `tags` input.
@@ -52,35 +40,26 @@ inputs:
         type=raw,value=1.2.3
         type=raw,value=one-tag-to-rule-them-all
         type=semver,pattern={{major}}.{{minor}}
-    required: false
   description:
     description: Value for org.opencontainers.image.description label
-    required: false
   extra_labels:
     description: Extra labels (multiline key=value), appended verbatim
-    required: false
   build_args:
     description: Additional build-args (multiline KEY=VALUE), appended verbatim
-    required: false
   build_arg_name_for_version:
     description: If set, injects the computed `version` into build-args as NAME=VALUE
-    required: false
   version:
     description: Version to inject (if `build_arg_name_for_version` is set). Defaults to the current branch name.
-    required: false
   cache_from_overrides:
     description: Override cache-from lines (multiline). If set, skips `smart_cache`.
-    required: false
   cache_write_scope:
     description: Scope name for cache-to (defaults to current branch). Use to control where cache is written.
-    required: false
   smart_cache:
     description: Enable smart cache-from heuristic (head, base, develop, main). Ignored if `cache_from_overrides` is provided.
     default: 'true'
   secrets:
     description: |
       Additional BuildKit secrets (one per line). Examples: `id=GIT_AUTH_TOKEN,env=GITHUB_TOKEN` or `id=mysecret,src=/path/to/file`
-    required: false
 
 outputs:
   tags:
@@ -151,28 +130,6 @@ runs:
           } >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Compute push and version
-      id: cfg
-      shell: bash
-      run: |
-        HEAD='${{ steps.branches.outputs.head }}'
-        PUSH=false
-        if [ "${{ inputs.force_push }}" = "true" ]; then
-          PUSH=true
-        else
-          BRANCH_LIST='${{ inputs.push_on_branches }}'
-          if [ -n "$BRANCH_LIST" ]; then
-            IFS=',' read -ra BRANCHES <<< "$BRANCH_LIST"
-            for b in "${BRANCHES[@]}"; do
-              if [ "$HEAD" = "${b}" ]; then PUSH=true; fi
-            done
-          fi
-        fi
-        VERSION='${{ inputs.version }}'
-        if [ -z "$VERSION" ]; then VERSION="$HEAD"; fi
-        echo "push=${PUSH}" >> "$GITHUB_OUTPUT"
-        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
     - name: Docker meta (tags & labels)
       id: meta
       uses: docker/metadata-action@v5
@@ -181,13 +138,22 @@ runs:
         tags: |
           type=sha,enable=${{ inputs.include_tag_sha == 'true' }}
           type=ref,event=branch,enable=${{ inputs.include_tag_ref == 'true' }}
-          type=raw,value=${{ inputs.tag_latest_name }},enable=${{ steps.branches.outputs.head == inputs.tag_latest_branch }}
-          type=raw,value=${{ inputs.tag_nightly_name }},enable=${{ steps.branches.outputs.head == inputs.tag_nightly_branch }}
+          type=raw,value=latest,enable=${{ inputs.push == 'true' && inputs.latest_tag_on_main_push == 'true' && steps.branches.outputs.head == 'main' }}
+          type=raw,value=nightly,enable=${{ inputs.push == 'true' && inputs.nightly_tag_on_develop_push == 'true' && steps.branches.outputs.head == 'develop' }}
           ${{ inputs.tags }}
         labels: |
           ${{ inputs.description != '' && format('org.opencontainers.image.description={0}', inputs.description) || '' }}
           ${{ inputs.extra_labels }}
           quay.expires-after=20d
+
+    - name: Validate tags when pushing
+      if: ${{ inputs.push == 'true' }}
+      shell: bash
+      run: |
+        if [ -z "${{ steps.meta.outputs.tags }}" ]; then
+          echo "Error: push=true but no tags were generated. Enable at least one tag input (include_tag_sha/include_tag_ref/latest_tag_on_main_push/nightly_tag_on_develop_push or provide custom tags)." >&2
+          exit 1
+        fi
 
 
     - name: Build (and maybe push)
@@ -198,7 +164,7 @@ runs:
         file: ${{ inputs.file }}
         target: ${{ inputs.target }}
         platforms: ${{ inputs.platforms }}
-        push: ${{ steps.cfg.outputs.push == 'true' }}
+        push: ${{ inputs.push == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: ${{ steps.cache_from.outputs.cache_from }}
@@ -206,7 +172,7 @@ runs:
         provenance: false
         build-args: |
           ${{ inputs.build_args }}
-          ${{ inputs.build_arg_name_for_version != '' && format('{0}={1}', inputs.build_arg_name_for_version, steps.cfg.outputs.version) || '' }}
+          ${{ inputs.build_arg_name_for_version != '' && format('{0}={1}', inputs.build_arg_name_for_version, inputs.version != '' && inputs.version || steps.branches.outputs.head) || '' }}
         secrets: |
           ${{ inputs.secrets }}
 

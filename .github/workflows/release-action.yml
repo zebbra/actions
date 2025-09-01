@@ -82,7 +82,8 @@ jobs:
             fi
             next="$NEXT_VERSION"
           else
-            highest=$(git tag --list "$action/v*" | sed -E "s#^$action/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            all_tags=$(git tag --list "$action/*" | tr -d '\r' || true)
+            highest=$(printf '%s\n' "$all_tags" | awk -F'/' -v a="$action" '$1==a && $2 ~ /^v[0-9]+$/ { sub(/^v/, "", $2); print $2 }' | sort -n | tail -1)
             if [ -z "$highest" ]; then
               next="v0"
             else
@@ -115,7 +116,8 @@ jobs:
           action="${{ steps.select.outputs.action }}"
           ver="${{ steps.select.outputs.next_version }}"
           if [ -z "$ver" ]; then
-            highest=$(git tag --list "$action/v*" | sed -E "s#^$action/v([0-9]+)$#\1#" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            all_tags=$(git tag --list "$action/*" | tr -d '\r' || true)
+            highest=$(printf '%s\n' "$all_tags" | awk -F'/' -v a="$action" '$1==a && $2 ~ /^v[0-9]+$/ { sub(/^v/, "", $2); print $2 }' | sort -n | tail -1)
             ver="v${highest:-0}"
           fi
           python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
