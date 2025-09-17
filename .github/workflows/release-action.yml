@@ -122,7 +122,7 @@ jobs:
           fi
           python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
           python3 -m pip install pyyaml >/dev/null 2>&1
-          python3 .github/scripts/generate_action_docs.py "$action" "$ver"
+          python3 .github/workflows/scripts/generate_action_docs.py "$action" "$ver"
 
       - name: Update README latest tags table
         shell: bash
