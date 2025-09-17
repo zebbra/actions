@@ -41,7 +41,7 @@ jobs:
           else
             echo "No changed files detected by git diff"
           fi
-          actions=$(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          actions=$(find . -mindepth 2 -maxdepth 2 -type f -name action.yml -print0 | xargs -0 -r -n1 dirname | xargs -r -n1 basename | sort -u)
           changed=""
           for a in $actions; do
             if grep -qE "^${a}/" <<<"$files"; then
