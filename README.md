@@ -11,9 +11,9 @@ Reference actions by namespaced tags:
 steps:
   - uses: actions/checkout@v4
   - name: Check SemVer
-    uses: zebbra/actions/.github/actions/check-semver@check-semver/v1
+    uses: zebbra/actions/check-semver@check-semver/v1
   - name: Build image (no push)
-    uses: zebbra/actions/.github/actions/docker-build@docker-build/v1
+    uses: zebbra/actions/docker-build@docker-build/v1
     with:
       image_name: ghcr.io/zebbra/my-service
       context: .
