@@ -19,7 +19,7 @@ def escape_pipes(value: Any) -> str:
 
 
 def load_action_yaml(action_name: str) -> Dict[str, Any]:
-    action_path = Path(".github/actions") / action_name / "action.yml"
+    action_path = Path(action_name) / "action.yml"
     if not action_path.is_file():
         raise FileNotFoundError(f"Missing action.yml at {action_path}")
     with action_path.open("r", encoding="utf-8") as f:
@@ -55,9 +55,7 @@ def render_markdown(
     lines.append("    runs-on: ubuntu-latest")
     lines.append("    steps:")
     lines.append("      - uses: actions/checkout@v4")
-    lines.append(
-        f"      - uses: zebbra/actions/.github/actions/{action_name}@{action_name}/{version}"
-    )
+    lines.append(f"      - uses: zebbra/actions/{action_name}@{action_name}/{version}")
     lines.append("      # with:")
     lines.append("      #   <input_name>: <value>")
     lines.append("```")
@@ -103,15 +101,13 @@ def render_markdown(
     lines.append("## Technical")
     lines.append(f"- runs.using: `{using}`")
     if repo_web_base:
-        action_web = f"{repo_web_base}/blob/{action_name}/{version}/.github/actions/{action_name}/action.yml"
-        lines.append(
-            f"- action path: [.github/actions/{action_name}/action.yml]({action_web})"
+        action_web = (
+            f"{repo_web_base}/blob/{action_name}/{version}/{action_name}/action.yml"
         )
+        lines.append(f"- action path: [{action_name}/action.yml]({action_web})")
     else:
-        action_rel = f"../../.github/actions/{action_name}/action.yml"
-        lines.append(
-            f"- action path: [.github/actions/{action_name}/action.yml]({action_rel})"
-        )
+        action_rel = f"../../{action_name}/action.yml"
+        lines.append(f"- action path: [{action_name}/action.yml]({action_rel})")
 
     # Referenced actions
     lines.append("")
@@ -129,7 +125,7 @@ def render_markdown(
     # Files list (link to all files under the action directory)
     lines.append("")
     lines.append("### Files")
-    action_root = Path(".github/actions") / action_name
+    action_root = Path(action_name)
     file_paths = []
     if action_root.exists():
         for p in sorted(action_root.rglob("*")):

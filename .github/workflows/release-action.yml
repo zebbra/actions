@@ -31,9 +31,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          mapfile -t actions < <(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
           if [ ${#actions[@]} -eq 0 ]; then
-            echo 'No actions found under .github/actions' >&2
+            echo 'No actions found in the repository' >&2
             exit 1
           fi
           printf 'found=%s\n' "${actions[*]}" >> "$GITHUB_OUTPUT"
@@ -131,7 +131,7 @@ jobs:
           # Ensure local view has all tags just pushed
           git fetch --tags --force || true
           # Build table
-          mapfile -t actions < <(find .github/actions -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          mapfile -t actions < <(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
           tmpfile=$(mktemp)
           echo "| Action | Latest version | Documentation |" > "$tmpfile"
           echo "| ------ | -------------- | ------------- |" >> "$tmpfile"

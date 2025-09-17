@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     paths:
-      - '.github/actions/**'
+      - '*/**'
       - '.github/workflows/**'
       - 'README.md'
   push:
@@ -41,7 +41,14 @@ jobs:
           else
             echo "No changed files detected by git diff"
           fi
-          changed=$(awk '/^.github\/actions\//{split($0,a,"/"); if (a[3] != "") print a[3]; }' <<<"$files" | sort -u | paste -sd' ' -)
+          actions=$(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
+          changed=""
+          for a in $actions; do
+            if grep -qE "^${a}/" <<<"$files"; then
+              changed="$changed $a"
+            fi
+          done
+          changed=$(echo "$changed" | xargs -n1 | sort -u | paste -sd' ' -)
           printf 'Detected changed actions: %s\n' "${changed:-<none>}"
           echo "::endgroup::"
           echo "actions=$changed" >> "$GITHUB_OUTPUT"
@@ -52,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           for a in ${{ steps.changed.outputs.actions }}; do
-            file=".github/actions/$a/action.yml"
+            file="$a/action.yml"
             if [ ! -f "$file" ]; then
               echo "Missing $file" >&2
               exit 1
@@ -76,9 +83,9 @@ jobs:
         run: |
           set -euo pipefail
           for a in ${{ steps.changed.outputs.actions }}; do
-            if [ -f ".github/actions/$a/Dockerfile" ]; then
-              echo "Building Docker-based action: .github/actions/$a"
-              docker build ".github/actions/$a" -t test/$a:ci
+            if [ -f "$a/Dockerfile" ]; then
+              echo "Building Docker-based action: $a"
+              docker build "$a" -t test/$a:ci
             else
               echo "Skipping docker build for $a (no Dockerfile)"
             fi
