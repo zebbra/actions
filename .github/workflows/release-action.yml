@@ -61,17 +61,16 @@ jobs:
           echo "action=$action" >> "$GITHUB_OUTPUT"
           echo "next_version=${INPUT_VERSION:-}" >> "$GITHUB_OUTPUT"
 
-      - name: Compute and create tags
+      - name: Resolve next version and validate
+        id: resolve
         env:
           SELECTED_ACTION: ${{ steps.select.outputs.action }}
           NEXT_VERSION: ${{ steps.select.outputs.next_version }}
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-
           action="$SELECTED_ACTION"
+          git fetch --tags --force >/dev/null 2>&1 || true
 
           # Derive next version if not provided
           next=""
@@ -97,39 +96,29 @@ jobs:
             exit 1
           fi
 
-            echo "Releasing $action/$next at $GITHUB_SHA"
-            git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
-            git push origin "$action/$next"
-
-          # Move latest pointer
-          if git rev-parse -q --verify "refs/tags/$action/latest" >/dev/null; then
-            git tag -fa "$action/latest" -m "Move $action/latest -> $GITHUB_SHA" "$GITHUB_SHA"
-          else
-            git tag -a "$action/latest" -m "Create $action/latest at $GITHUB_SHA" "$GITHUB_SHA"
-          fi
-          git push origin --force "$action/latest"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
 
       - name: Generate versioned docs for action
         shell: bash
         run: |
           set -euo pipefail
           action="${{ steps.select.outputs.action }}"
-          ver="${{ steps.select.outputs.next_version }}"
-          if [ -z "$ver" ]; then
-            all_tags=$(git tag --list "$action/*" | tr -d '\r' || true)
-            highest=$(printf '%s\n' "$all_tags" | awk -F'/' -v a="$action" '$1==a && $2 ~ /^v[0-9]+$/ { sub(/^v/, "", $2); print $2 }' | sort -n | tail -1)
-            ver="v${highest:-0}"
-          fi
+          ver="${{ steps.resolve.outputs.version }}"
           python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
           python3 -m pip install pyyaml >/dev/null 2>&1
           python3 .github/workflows/scripts/generate_action_docs.py "$action" "$ver"
 
       - name: Update README latest tags table
         shell: bash
+        env:
+          SELECTED_ACTION: ${{ steps.select.outputs.action }}
+          RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
         run: |
           set -euo pipefail
-          # Ensure local view has all tags just pushed
+          # Ensure we have all remote tags for other actions (selected action will be overridden)
           git fetch --tags --force || true
+          selected="$SELECTED_ACTION"
+          resolved_numeric=$(echo "$RESOLVED_VERSION" | sed -E 's/^v([0-9]+)$/\1/')
           # Build table
           mapfile -t actions < <(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print0 | xargs -0 -I{} bash -lc '[ -f "{}/action.yml" ] && basename "{}"' | sort -u)
           tmpfile=$(mktemp)
@@ -141,6 +130,9 @@ jobs:
             echo "All tags for $a:" && printf '%s\n' "$all_tags"
             numeric=$(printf '%s\n' "$all_tags" | awk -F'/' '$2 ~ /^v[0-9]+$/ {print $2}' | sed -E 's/^v([0-9]+)$/\1/' | sort -n || true)
             highest=$(printf '%s\n' "$numeric" | tail -1)
+            if [ "$a" = "$selected" ]; then
+              highest="$resolved_numeric"
+            fi
             echo "Highest numeric for $a: ${highest:-<none>}"
             if [ -n "$highest" ]; then
               ver="${a}/v${highest}"
@@ -180,6 +172,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
           git add README.md docs || true
           if git diff --cached --quiet; then
             echo "No README changes to commit"
@@ -187,4 +181,34 @@ jobs:
           fi
           git commit -m "docs(${SELECTED_ACTION}): add ${SELECTED_ACTION} docs and refresh Latest tags/index"
           git push
+
+      - name: Create and push tag
+        env:
+          SELECTED_ACTION: ${{ steps.select.outputs.action }}
+          RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force || true
+          action="$SELECTED_ACTION"
+          next="$RESOLVED_VERSION"
+          if [ -z "$next" ]; then
+            echo "Resolved version is empty" >&2
+            exit 1
+          fi
+          # Double-check tag still does not exist
+          if git rev-parse -q --verify "refs/tags/$action/$next" >/dev/null; then
+            echo "Tag already exists: $action/$next" >&2
+            exit 1
+          fi
+          echo "Releasing $action/$next at $GITHUB_SHA"
+          git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
+          git push origin "$action/$next"
+          # Move latest pointer
+          if git rev-parse -q --verify "refs/tags/$action/latest" >/dev/null; then
+            git tag -fa "$action/latest" -m "Move $action/latest -> $GITHUB_SHA" "$GITHUB_SHA"
+          else
+            git tag -a "$action/latest" -m "Create $action/latest at $GITHUB_SHA" "$GITHUB_SHA"
+          fi
+          git push origin --force "$action/latest"
 

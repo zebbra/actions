@@ -46,10 +46,6 @@ inputs:
     description: Extra labels (multiline `key=value`), appended verbatim
   build_args:
     description: Additional build-args (multiline `KEY=VALUE`), appended verbatim
-  build_arg_name_for_version:
-    description: If set, injects the computed `version` into `build-args` as `NAME=VALUE`
-  version:
-    description: Version to inject (if `build_arg_name_for_version` is set). Defaults to the current branch name.
   cache_from_overrides:
     description: Override `cache-from` lines (multiline). If set, skips `smart_cache`.
   cache_write_scope:
@@ -170,10 +166,7 @@ runs:
         cache-from: ${{ steps.cache_from.outputs.cache_from }}
         cache-to: type=gha,mode=max,scope=${{ inputs.cache_write_scope != '' && inputs.cache_write_scope || steps.branches.outputs.head }}
         provenance: false
-        build-args: |
-          ${{ inputs.build_args }}
-          ${{ inputs.build_arg_name_for_version != '' && format('{0}={1}', inputs.build_arg_name_for_version, inputs.version != '' && inputs.version || steps.branches.outputs.head) || '' }}
-        secrets: |
-          ${{ inputs.secrets }}
+        build-args: ${{ inputs.build_args }}
+        secrets: ${{ inputs.secrets }}
 
 
