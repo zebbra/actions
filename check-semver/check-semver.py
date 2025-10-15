@@ -13,7 +13,7 @@ proc = subprocess.Popen(
     [
         "sh",
         "-c",
-        'git rev-list --tags --reverse | while read commit; do git tag --points-at "$commit" | sort ; done',
+        'git rev-list --tags --reverse | while read commit; do git tag --points-at "$commit"  --merged | sort ; done',
     ],
     stdout=subprocess.PIPE,
     encoding="utf8",
@@ -55,7 +55,7 @@ if not check_semver_order(semver_tags)[0]:
         f"🚫 There was a tag ({incorrect_tag}) that broke semver versioning. Please make sure tags are in correct semver order when sorted temporally."
     )
     print(
-        '📋 Execute this to check tag order locally: git rev-list --tags --reverse | while read commit; do git tag --points-at "$commit" | sort; done'
+        '📋 Execute this to check tag order locally: git rev-list --tags --reverse | while read commit; do git tag --points-at "$commit"  --merged | sort; done'
     )
     sys.exit(1)
 else:
