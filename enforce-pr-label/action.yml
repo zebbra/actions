@@ -1,0 +1,73 @@
+name: "Enforce PR Label"
+description: "Fail if a pull request lacks one of the required PR labels"
+author: "Zebbra AG"
+
+inputs:
+  required_labels:
+    description: "Whitespace-separated list of valid PR labels"
+    default: "pr-bugfix pr-breaking-change pr-other pr-new-feature pr-security"
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure this action runs only on pull_request events
+      if: ${{ github.event_name != 'pull_request' }}
+      shell: bash
+      run: |
+        echo "Error: This action must be run on pull_request events. Current event: $GITHUB_EVENT_NAME" >&2
+        exit 1
+
+    - name: Install dependencies if missing
+      if: ${{ github.event_name == 'pull_request' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v gh >/dev/null 2>&1; then
+          echo "gh found: $(gh --version | head -n1)"
+        else
+          echo "gh not found; attempting installation..."
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+            echo "gh installed: $(gh --version | head -n1)"
+          else
+            echo "Warning: gh not found and apt-get is unavailable; please install gh before running this action." >&2
+          fi
+        fi
+
+    - name: Enforce PR label
+      id: enforce
+      if: ${{ github.event_name == 'pull_request' }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Get the labels for the current PR
+        LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
+
+        # Define the required label types
+        VALID_LABELS=(${{ inputs.required_labels }})
+
+        # Flag to track if a valid label is found
+        VALID_LABEL_FOUND=false
+
+        # Check if any of the PR's labels match the required labels
+        for label in $LABELS; do
+          for valid_label in "${VALID_LABELS[@]}"; do
+            if [[ "$label" == "$valid_label" ]]; then
+              VALID_LABEL_FOUND=true
+              break 2
+            fi
+          done
+        done
+
+        # If no valid label is found, fail the workflow
+        if [[ "$VALID_LABEL_FOUND" == "false" ]]; then
+          echo "Error: PR must have one of the following labels: ${VALID_LABELS[*]}"
+          exit 1
+        fi
+
+
