@@ -46,7 +46,7 @@ runs:
         set -euo pipefail
 
         # Get the labels for the current PR
-        LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
+        LABELS=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
 
         # Define the required label types
         VALID_LABELS=(${{ inputs.required_labels }})
