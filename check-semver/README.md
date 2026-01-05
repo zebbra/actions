@@ -22,15 +22,6 @@ jobs:
 ## Outputs
 (none)
 
-## Overview
-
-This action ensures that semantic version tags are in correct chronological order. It supports two modes:
-
-| Mode | Description | Default |
-|------|-------------|---------|
-| **Strict** | All tags must be in global semver order. No backports allowed. | ✅ Yes |
-| **Branch-aware** | Tags grouped by `major.minor` series. Backports across series allowed. | No |
-
 ## Key Features
 
 - **Efficient**: O(n log n) complexity using a single git command
