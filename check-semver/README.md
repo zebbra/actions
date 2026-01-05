@@ -1,6 +1,6 @@
-# `check-semver/v2` - Check SemVer on Branch
+# `check-semver/v1` - Check SemVer on Branch
 
-A GitHub Action that checks SemVer integrity on a branch
+This action ensures that semantic version tags are in correct chronological order.
 
 ## Quick usage
 ```yaml
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: zebbra/actions/check-semver@check-semver/v2
+      - uses: zebbra/actions/check-semver@check-semver/v1
       # with:
       #   <input_name>: <value>
 ```
@@ -140,17 +140,17 @@ Total: 1 violation(s) found
 
 ## Technical
 - runs.using: `composite`
-- action path: [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/action.yml)
+- action path: [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v1/check-semver/action.yml)
 
 ### Referenced actions
 - `actions/checkout@v4`
 - `actions/setup-python@v5`
 
 ### Files
-- [check-semver/README.md](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/README.md)
-- [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/action.yml)
-- [check-semver/check-semver.py](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/check-semver.py)
-- [check-semver/requirements.txt](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/requirements.txt)
+- [check-semver/README.md](https://github.com/zebbra/actions/blob/check-semver/v1/check-semver/README.md)
+- [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v1/check-semver/action.yml)
+- [check-semver/check-semver.py](https://github.com/zebbra/actions/blob/check-semver/v1/check-semver/check-semver.py)
+- [check-semver/requirements.txt](https://github.com/zebbra/actions/blob/check-semver/v1/check-semver/requirements.txt)
 
 ## Other versions
-- [v1](./v1.md)
+(none)
