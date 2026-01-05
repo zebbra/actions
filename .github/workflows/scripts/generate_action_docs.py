@@ -1,24 +1,49 @@
 #!/usr/bin/env python3
+"""
+generate_action_docs.py - Generate documentation for GitHub Actions.
 
-import os
+This script generates markdown documentation for actions by:
+1. Parsing action.yml for inputs, outputs, and metadata
+2. Including optional DOCS.md content from the action folder
+3. Generating both versioned docs (docs/<action>/vN.md) and action README
+
+Usage:
+    python generate_action_docs.py <action> <version>
+
+Example:
+    python generate_action_docs.py check-semver v2
+"""
+
+import logging
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
-import subprocess
 
 try:
     import yaml  # type: ignore
-except Exception as exc:  # pragma: no cover
+except Exception:  # pragma: no cover
     print("PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
     raise
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
 
 def escape_pipes(value: Any) -> str:
+    """Escape pipe characters for markdown tables."""
     text = str(value) if value is not None else ""
     return text.replace("|", "\\|")
 
 
 def load_action_yaml(action_name: str) -> Dict[str, Any]:
+    """Load and parse the action.yml file."""
     action_path = Path(action_name) / "action.yml"
     if not action_path.is_file():
         raise FileNotFoundError(f"Missing action.yml at {action_path}")
@@ -26,12 +51,61 @@ def load_action_yaml(action_name: str) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def load_docs_md(action_name: str) -> Optional[str]:
+    """
+    Load optional DOCS.md from the action folder.
+
+    If DOCS.md exists, its content is loaded and H1 headings are stripped
+    to avoid conflicting with the generated document structure.
+
+    Args:
+        action_name: Name of the action (folder name).
+
+    Returns:
+        Processed DOCS.md content, or None if file doesn't exist.
+    """
+    docs_path = Path(action_name) / "DOCS.md"
+    if not docs_path.is_file():
+        logger.debug(f"No DOCS.md found at {docs_path}")
+        return None
+
+    logger.info(f"📄 Including DOCS.md from {docs_path}")
+    content = docs_path.read_text(encoding="utf-8")
+
+    # Strip H1 headings (lines starting with single #)
+    # This prevents title conflicts in the generated documentation
+    lines = content.split("\n")
+    filtered_lines = []
+    for line in lines:
+        # Match lines that start with exactly one # followed by space (H1)
+        if re.match(r"^#\s+", line) and not re.match(r"^##", line):
+            logger.debug(f"Stripping H1 heading: {line[:50]}...")
+            continue
+        filtered_lines.append(line)
+
+    return "\n".join(filtered_lines).strip()
+
+
 def render_markdown(
     action_name: str,
     version: str,
     data: Dict[str, Any],
+    docs_content: Optional[str] = None,
     repo_web_base: Optional[str] = None,
 ) -> str:
+    """
+    Render the complete markdown documentation.
+
+    Args:
+        action_name: Name of the action.
+        version: Version string (e.g., 'v2').
+        data: Parsed action.yml data.
+        docs_content: Optional content from DOCS.md to include.
+        repo_web_base: Optional GitHub repository base URL.
+
+    Returns:
+        Complete markdown documentation string.
+    """
     name = data.get("name", action_name)
     desc = data.get("description", "")
     runs = data.get("runs", {}) or {}
@@ -96,6 +170,11 @@ def render_markdown(
     else:
         lines.append("(none)")
 
+    # Include DOCS.md content after Outputs (if available)
+    if docs_content:
+        lines.append("")
+        lines.append(docs_content)
+
     # Technical
     lines.append("")
     lines.append("## Technical")
@@ -130,6 +209,9 @@ def render_markdown(
     if action_root.exists():
         for p in sorted(action_root.rglob("*")):
             if p.is_file():
+                # Skip DOCS.md from file listing (it's internal)
+                if p.name == "DOCS.md":
+                    continue
                 if repo_web_base:
                     repo_path = p.as_posix()
                     web_link = (
@@ -149,6 +231,7 @@ def render_markdown(
 
 
 def add_other_versions_links(doc_path: Path, action_name: str, version: str) -> None:
+    """Append links to other versions at the end of the documentation."""
     folder = doc_path.parent
     versions = []
     if folder.is_dir():
@@ -171,17 +254,8 @@ def add_other_versions_links(doc_path: Path, action_name: str, version: str) -> 
             f.write("(none)\n")
 
 
-def main() -> int:
-    if len(sys.argv) != 3:
-        print("Usage: generate_action_docs.py <action> <version>", file=sys.stderr)
-        return 2
-    action = sys.argv[1]
-    version = sys.argv[2]
-
-    data = load_action_yaml(action)
-
-    # Determine repository web base (e.g., https://github.com/<owner>/<repo>) from git remote
-    repo_web_base: Optional[str] = None
+def get_repo_web_base() -> Optional[str]:
+    """Determine the GitHub repository web base URL from git remote."""
     try:
         remote_url = subprocess.check_output(
             ["git", "config", "--get", "remote.origin.url"], text=True
@@ -191,26 +265,61 @@ def main() -> int:
                 path = remote_url[len("git@github.com:") :]
                 if path.endswith(".git"):
                     path = path[:-4]
-                repo_web_base = f"https://github.com/{path}"
+                return f"https://github.com/{path}"
             elif "github.com/" in remote_url:
                 # Handles https://github.com/<owner>/<repo>[.git]
                 path = remote_url.split("github.com/")[-1]
                 if path.endswith(".git"):
                     path = path[:-4]
-                repo_web_base = f"https://github.com/{path}"
+                return f"https://github.com/{path}"
     except Exception:
-        repo_web_base = None
+        pass
+    return None
 
-    content = render_markdown(action, version, data, repo_web_base)
 
+def main() -> int:
+    """Main entry point for documentation generation."""
+    if len(sys.argv) != 3:
+        print("Usage: generate_action_docs.py <action> <version>", file=sys.stderr)
+        return 2
+
+    action = sys.argv[1]
+    version = sys.argv[2]
+
+    logger.info(f"🔧 Generating documentation for {action}/{version}")
+
+    # Load action.yml
+    data = load_action_yaml(action)
+
+    # Load optional DOCS.md
+    docs_content = load_docs_md(action)
+
+    # Determine repository web base
+    repo_web_base = get_repo_web_base()
+
+    # Render markdown content
+    content = render_markdown(action, version, data, docs_content, repo_web_base)
+
+    # Write versioned documentation to docs/<action>/vN.md
     out_dir = Path("docs") / action
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{version}.md"
     out_path.write_text(content, encoding="utf-8")
 
+    # Add other versions links
     add_other_versions_links(out_path, action, version)
 
-    print(f"Generated docs at {out_path}")
+    logger.info(f"✅ Generated versioned docs at {out_path}")
+
+    # Generate action README.md (copy of generated docs for GitHub display)
+    readme_path = Path(action) / "README.md"
+
+    # Re-read the final content (includes "Other versions" section)
+    final_content = out_path.read_text(encoding="utf-8")
+    readme_path.write_text(final_content, encoding="utf-8")
+
+    logger.info(f"✅ Generated action README at {readme_path}")
+
     return 0
 
 

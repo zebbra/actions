@@ -1,26 +1,4 @@
-# `check-semver/v2` - Check SemVer on Branch
-
-A GitHub Action that checks SemVer integrity on a branch
-
-## Quick usage
-```yaml
-jobs:
-  example:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: zebbra/actions/check-semver@check-semver/v2
-      # with:
-      #   <input_name>: <value>
-```
-
-## Inputs
-| Name | Required | Default | Description |
-| ---- | -------- | ------- | ----------- |
-| `allow_backports` | false | `false` | Enable branch-aware mode that allows backported releases across different major.minor series (e.g., v1.0.1 after v1.1.0). When false (default), strict global ordering is enforced. |
-
-## Outputs
-(none)
+# Check SemVer Documentation
 
 ## Overview
 
@@ -146,20 +124,3 @@ Total: 1 violation(s) found
    branches), set ALLOW_BACKPORTS=true to enable branch-aware mode.
 ======================================================================
 ```
-
-## Technical
-- runs.using: `composite`
-- action path: [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/action.yml)
-
-### Referenced actions
-- `actions/checkout@v4`
-- `actions/setup-python@v5`
-
-### Files
-- [check-semver/README.md](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/README.md)
-- [check-semver/action.yml](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/action.yml)
-- [check-semver/check-semver.py](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/check-semver.py)
-- [check-semver/requirements.txt](https://github.com/zebbra/actions/blob/check-semver/v2/check-semver/requirements.txt)
-
-## Other versions
-- [v1](./v1.md)
