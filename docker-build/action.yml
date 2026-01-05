@@ -21,6 +21,12 @@ inputs:
       Push the built image to the registry (`true`/`false`).
       Requires at least one tag to be enabled/provided (e.g., `include_tag_sha`, `include_tag_ref`, `latest_tag_on_main_push`, `nightly_tag_on_develop_push`, or `tags`).
     default: 'false'
+  load:
+    description: |
+      Load the built image into the local Docker daemon (`true`/`false`).
+      Useful for local testing or when you need the image available locally after build.
+      Note: Cannot be used together with multi-platform builds (`platforms` input).
+    default: 'false'
   include_tag_sha:
     description: Include a tag based on the commit SHA (`true`/`false`).
     default: 'false'
@@ -161,6 +167,7 @@ runs:
         target: ${{ inputs.target }}
         platforms: ${{ inputs.platforms }}
         push: ${{ inputs.push == 'true' }}
+        load: ${{ inputs.load == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: ${{ steps.cache_from.outputs.cache_from }}
