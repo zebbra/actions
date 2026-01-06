@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+rules:
+  - |
+    ## Docs generation rule (read before editing)
+    - Do NOT edit generated docs: `docs/**` and `<action>/README.md` (overwritten on release).
+    - Only add hand-written action docs in `<action>/DOCS.md` (keep concise; do not duplicate generated sections).
+    - Auto-generated sections (do NOT add these to `DOCS.md`): title/description, quick usage snippet, inputs table, outputs table, technical (`runs.*`) info, referenced actions, files list, other versions links.
+    - Avoid H1 (`# ...`) in `DOCS.md` (generator strips H1 lines).
+    - Do NOT edit the generated section of root `README.md` between `<!-- LATEST_TAGS_START -->` / `<!-- LATEST_TAGS_END -->`.
+
+    ## How it’s generated (source of truth)
+    - Trigger: `.github/workflows/release-action.yml`
+    - Generator: `.github/workflows/scripts/generate_action_docs.py <action> <version>`
+    - Sources: `action.yml` (+ optional `DOCS.md`)
+    - Writes: `docs/<action>/<version>.md` + `<action>/README.md`
+    - Also updates root `README.md` between `<!-- LATEST_TAGS_START -->` / `<!-- LATEST_TAGS_END -->`
+
+    ## If docs must change
+    - Change `action.yml` or `<action>/DOCS.md`; otherwise change the generator script (ask first for format/structure changes).
+
+---

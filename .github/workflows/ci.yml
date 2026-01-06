@@ -21,6 +21,92 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Guard generated docs (PRs)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          echo "::group::Generated docs guard"
+          printf 'Base SHA: %s\n' "$base"
+          printf 'Head SHA: %s\n' "$head"
+          files=$(git diff --name-only "$base" "$head" || true)
+          if [ -z "${files:-}" ]; then
+            echo "No changed files detected by git diff"
+            echo "::endgroup::"
+            exit 0
+          fi
+          echo "Changed files:"
+          printf '%s\n' "$files"
+          bad=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [[ "$f" == docs/* ]]; then
+              echo "ERROR: Do not edit generated docs under docs/: $f" >&2
+              bad=1
+              continue
+            fi
+            if [[ "$f" == */README.md && "$f" != "README.md" ]]; then
+              dir="${f%%/*}"
+              if [ -f "$dir/action.yml" ]; then
+                echo "ERROR: Do not edit generated action README: $f" >&2
+                bad=1
+              fi
+            fi
+          done <<<"$files"
+          if printf '%s\n' "$files" | grep -qx 'README.md'; then
+            if ! python3 - <<'PY'
+          import subprocess, sys
+
+          base = "${{ github.event.pull_request.base.sha }}"
+          head = "${{ github.event.pull_request.head.sha }}"
+          start = "<!-- LATEST_TAGS_START -->"
+          end = "<!-- LATEST_TAGS_END -->"
+
+
+          def read_at(ref: str, path: str) -> str:
+              try:
+                  return subprocess.check_output(["git", "show", f"{ref}:{path}"], text=True)
+              except subprocess.CalledProcessError:
+                  return ""
+
+
+          def extract_block(txt: str) -> str | None:
+              if start not in txt or end not in txt:
+                  return None
+              after = txt.split(start, 1)[1]
+              return after.split(end, 1)[0]
+
+
+          a = extract_block(read_at(base, "README.md"))
+          b = extract_block(read_at(head, "README.md"))
+
+          if a is None or b is None:
+              if a != b:
+                  print(
+                      "ERROR: Do not add/remove/modify the README.md LATEST_TAGS marker block (generated on release).",
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(2)
+          else:
+              if a != b:
+                  print(
+                      "ERROR: Do not modify README.md content between LATEST_TAGS_START/END (generated on release).",
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(2)
+          PY
+            then
+              bad=1
+            fi
+          fi
+          echo "::endgroup::"
+          if [ "$bad" -ne 0 ]; then
+            echo "Generated docs guard failed. Update sources (action.yml / DOCS.md); the release workflow regenerates docs/ and action READMEs." >&2
+            exit 1
+          fi
+
       - name: Detect changed actions
         id: changed
         shell: bash

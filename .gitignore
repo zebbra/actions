@@ -4,7 +4,12 @@
 # Editors/IDEs
 .idea/
 .vscode/
+# Cursor (ignore everything except shared rules)
 .cursor/
+!.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 .fleet/
 .history/
 *.swp
