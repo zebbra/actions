@@ -11,6 +11,20 @@ inputs:
     required: false
     default: 'false'
 
+outputs:
+  version:
+    description: "Version number without 'v' prefix (e.g., '1.2.3')"
+    value: ${{ steps.version.outputs.version }}
+  major:
+    description: "Major version number (e.g., '1')"
+    value: ${{ steps.version.outputs.major }}
+  minor:
+    description: "Minor version number (e.g., '2')"
+    value: ${{ steps.version.outputs.minor }}
+  major_minor:
+    description: "Major.minor version (e.g., '1.2')"
+    value: ${{ steps.version.outputs.major_minor }}
+
 runs:
   using: composite
   steps:
@@ -33,3 +47,21 @@ runs:
       env:
         ALLOW_BACKPORTS: ${{ inputs.allow_backports }}
       run: python "${{ github.action_path }}/check-semver.py"
+
+    - name: Calculate version tags
+      id: version
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        VERSION="${GITHUB_REF_NAME#v}"
+        MAJOR="${VERSION%%.*}"
+        MINOR="${VERSION#*.}"
+        MINOR="${MINOR%%.*}"
+        MAJOR_MINOR="${VERSION%.*}"
+        {
+          echo "version=${VERSION}"
+          echo "major=${MAJOR}"
+          echo "minor=${MINOR}"
+          echo "major_minor=${MAJOR_MINOR}"
+        } >> $GITHUB_OUTPUT

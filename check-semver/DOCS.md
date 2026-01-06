@@ -1,11 +1,11 @@
 # Check SemVer Documentation
 
 ## Key Features
-
 - **Efficient**: O(n log n) complexity using a single git command
 - **Configurable**: Choose between strict or branch-aware validation
 - **Informative output**: Detailed violation reports with suggested fixes
 - **Prerelease support**: Correctly handles prerelease versions (e.g., `1.0.0-alpha`, `1.0.0-beta`)
+- **Outputs**: exposes `version`, `major`, `minor`, and `major_minor` for usage in subsequent steps
 
 ## Validation Modes
 
