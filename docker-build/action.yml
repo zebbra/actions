@@ -56,6 +56,9 @@ inputs:
     description: Override `cache-from` lines (multiline). If set, skips `smart_cache`.
   cache_write_scope:
     description: Scope name for `cache-to` (defaults to current branch). Use to control where cache is written.
+  cache_to_mode:
+    description: "BuildKit cache-to mode (min|max)"
+    default: "max"
   smart_cache:
     description: Enable smart `cache-from` heuristic (head, base, develop, main). Ignored if `cache_from_overrides` is provided.
     default: 'true'
@@ -160,7 +163,7 @@ runs:
 
     - name: Build (and maybe push)
       id: build
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: ${{ inputs.context }}
         file: ${{ inputs.file }}
@@ -171,7 +174,7 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: ${{ steps.cache_from.outputs.cache_from }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.cache_write_scope != '' && inputs.cache_write_scope || steps.branches.outputs.head }}
+        cache-to: type=gha,mode=${{ inputs.cache_to_mode }},scope=${{ inputs.cache_write_scope != '' && inputs.cache_write_scope || steps.branches.outputs.head }},ignore-error=true
         provenance: false
         build-args: ${{ inputs.build_args }}
         secrets: ${{ inputs.secrets }}
