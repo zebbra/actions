@@ -27,37 +27,33 @@ runs:
     - name: Determine whether to create a release
       id: determine
       shell: bash
+      env: &regex_env
+        STABLE_RE: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        BETA_RE: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$'
       run: |
         set -euo pipefail
 
         TAG="${GITHUB_REF_NAME}"
         RELEASE_BETA_TAGS='${{ inputs.release_beta_tags }}'
 
-        STABLE_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-        BETA_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$'
-
         SHOULD_RELEASE="false"
         PRERELEASE="false"
         OUT_TAG=""
-        MSG="INFO: ref is not an eligible release tag; skipping: ${TAG}"
 
         if [[ "$TAG" =~ $STABLE_RE ]]; then
           SHOULD_RELEASE="true"
           PRERELEASE="false"
           OUT_TAG="${TAG}"
-          MSG="INFO: eligible stable tag detected: ${TAG}"
         elif [[ "$TAG" =~ $BETA_RE ]]; then
           if [[ "$RELEASE_BETA_TAGS" == "true" ]]; then
             SHOULD_RELEASE="true"
             PRERELEASE="true"
             OUT_TAG="${TAG}"
-            MSG="INFO: eligible beta tag detected (release_beta_tags=true): ${TAG}"
           else
-            MSG="INFO: beta tag detected but release_beta_tags=false; skipping: ${TAG}"
+            :
           fi
         fi
 
-        echo "${MSG}"
         {
           echo "should_release=${SHOULD_RELEASE}"
           echo "prerelease=${PRERELEASE}"
@@ -66,11 +62,37 @@ runs:
 
     - name: Create GitHub Release
       if: ${{ steps.determine.outputs.should_release == 'true' }}
+      id: release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.determine.outputs.tag }}
         generate_release_notes: true
         draft: false
         prerelease: ${{ steps.determine.outputs.prerelease == 'true' }}
+
+    - name: Annotate result
+      if: ${{ steps.determine.outputs.should_release != 'true' || steps.release.outcome == 'success' }}
+      shell: bash
+      env: *regex_env
+      run: |
+        set -euo pipefail
+
+        REF="${GITHUB_REF_NAME}"
+
+        if [[ '${{ steps.determine.outputs.should_release }}' == "true" ]]; then
+          TAG='${{ steps.determine.outputs.tag }}'
+          PRERELEASE='${{ steps.determine.outputs.prerelease }}'
+          echo "::notice title=GitHub-Release: done::Created GitHub Release for ${TAG} (prerelease=${PRERELEASE})"
+          exit 0
+        fi
+
+        RELEASE_BETA_TAGS='${{ inputs.release_beta_tags }}'
+
+        if [[ "${REF}" =~ $BETA_RE ]] && [[ "${RELEASE_BETA_TAGS}" != "true" ]]; then
+          echo "::notice title=GitHub-Release: skipped (beta disabled)::Beta tag detected but release_beta_tags=false; skipping: ${REF}"
+          exit 0
+        fi
+
+        echo "::notice title=GitHub-Release: skipped::Ref is not an eligible release tag; skipping: ${REF}"
 
 
