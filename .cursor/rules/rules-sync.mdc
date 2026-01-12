@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+rules:
+  - |
+    ## Rules sync (short)
+    - Keep `AGENTS.md` (source of truth) and `.cursor/rules/*.mdc` in sync:
+      - If you add/change repo-wide guidance in `AGENTS.md`, add/update the corresponding Cursor rule.
+      - If you add/change a Cursor rule, add/update the corresponding section in `AGENTS.md`.
+---
+

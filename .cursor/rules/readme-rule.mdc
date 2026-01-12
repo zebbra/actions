@@ -2,21 +2,11 @@
 alwaysApply: true
 rules:
   - |
-    ## Docs generation rule (read before editing)
-    - Do NOT edit generated docs: `docs/**` and `<action>/README.md` (overwritten on release).
-    - Only add hand-written action docs in `<action>/DOCS.md` (keep concise; do not duplicate generated sections).
-    - Auto-generated sections (do NOT add these to `DOCS.md`): title/description, quick usage snippet, inputs table, outputs table, technical (`runs.*`) info, referenced actions, files list, other versions links.
-    - Avoid H1 (`# ...`) in `DOCS.md` (generator strips H1 lines).
-    - Do NOT edit the generated section of root `README.md` between `<!-- LATEST_TAGS_START -->` / `<!-- LATEST_TAGS_END -->`.
-
-    ## How it’s generated (source of truth)
-    - Trigger: `.github/workflows/release-action.yml`
-    - Generator: `.github/workflows/scripts/generate_action_docs.py <action> <version>`
-    - Sources: `action.yml` (+ optional `DOCS.md`)
-    - Writes: `docs/<action>/<version>.md` + `<action>/README.md`
-    - Also updates root `README.md` between `<!-- LATEST_TAGS_START -->` / `<!-- LATEST_TAGS_END -->`
-
-    ## If docs must change
-    - Change `action.yml` or `<action>/DOCS.md`; otherwise change the generator script (ask first for format/structure changes).
+    ## Docs rule (short, complete)
+    - Source of truth: `AGENTS.md` (docs policy + action structure).
+    - Never edit generated outputs: `docs/**`, `<action>/README.md`, or the root `README.md` section between `<!-- LATEST_TAGS_START -->` and `<!-- LATEST_TAGS_END -->`.
+    - Hand-written action docs go only in `<action>/DOCS.md` (narrative/gotchas). Avoid H1 (`# ...`) headings.
+    - Do not duplicate generated sections in `DOCS.md` (title/description, quick usage snippet, inputs/outputs tables, `runs.*` technical info, referenced actions, files list, other versions links).
+    - If docs must change: change `action.yml` or `<action>/DOCS.md`; for format/structure changes, change `.github/workflows/scripts/generate_action_docs.py` (ask first).
 
 ---

@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+rules:
+  - |
+    ## Action structure guideline (short, complete)
+    - Source of truth: `AGENTS.md` (docs policy + action structure).
+    - Prefer marketplace actions and composite `action.yml` (YAML-first).
+    - Use bash in `run:` steps for small glue (parsing, gating, formatting) before reaching for Python.
+    - Only add custom code when it meaningfully improves correctness or reduces complexity; keep it small, well-logged, and avoid unnecessary dependencies.
+    - If code is necessary: pin dependencies (e.g., `requirements.txt`) and keep logs concise with appropriate loglevels.
+---
+
