@@ -27,7 +27,7 @@ runs:
     - name: Determine whether to create a release
       id: determine
       shell: bash
-      env: &regex_env
+      env:
         STABLE_RE: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
         BETA_RE: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$'
       run: |
@@ -39,6 +39,7 @@ runs:
         SHOULD_RELEASE="false"
         PRERELEASE="false"
         OUT_TAG=""
+        SKIP_REASON=""
 
         if [[ "$TAG" =~ $STABLE_RE ]]; then
           SHOULD_RELEASE="true"
@@ -50,14 +51,19 @@ runs:
             PRERELEASE="true"
             OUT_TAG="${TAG}"
           else
-            :
+            SKIP_REASON="beta_disabled"
           fi
+        fi
+
+        if [[ "${SHOULD_RELEASE}" != "true" ]] && [[ -z "${SKIP_REASON}" ]]; then
+          SKIP_REASON="ineligible_ref"
         fi
 
         {
           echo "should_release=${SHOULD_RELEASE}"
           echo "prerelease=${PRERELEASE}"
           echo "tag=${OUT_TAG}"
+          echo "skip_reason=${SKIP_REASON}"
         } >> "$GITHUB_OUTPUT"
 
     - name: Create GitHub Release
@@ -73,7 +79,6 @@ runs:
     - name: Annotate result
       if: ${{ steps.determine.outputs.should_release != 'true' || steps.release.outcome == 'success' }}
       shell: bash
-      env: *regex_env
       run: |
         set -euo pipefail
 
@@ -86,9 +91,9 @@ runs:
           exit 0
         fi
 
-        RELEASE_BETA_TAGS='${{ inputs.release_beta_tags }}'
+        SKIP_REASON='${{ steps.determine.outputs.skip_reason }}'
 
-        if [[ "${REF}" =~ $BETA_RE ]] && [[ "${RELEASE_BETA_TAGS}" != "true" ]]; then
+        if [[ "${SKIP_REASON}" == "beta_disabled" ]]; then
           echo "::notice title=GitHub-Release: skipped (beta disabled)::Beta tag detected but release_beta_tags=false; skipping: ${REF}"
           exit 0
         fi
