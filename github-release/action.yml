@@ -1,0 +1,76 @@
+name: GitHub release (stable semver tags by default)
+description: Create a GitHub Release for eligible tags (stable semver by default; optionally include beta tags).
+author: Zebbra AG
+
+inputs:
+  release_beta_tags:
+    description: |
+      When `true`, also create releases for tags matching `vMAJOR.MINOR.PATCH-beta.N`.
+      When `false` (default), only stable tags matching `vMAJOR.MINOR.PATCH` are released.
+    required: false
+    default: 'false'
+
+outputs:
+  should_release:
+    description: Whether the action created (or will create) a GitHub Release for the current ref.
+    value: ${{ steps.determine.outputs.should_release }}
+  prerelease:
+    description: Whether the release is marked as prerelease (only true for allowed beta tags).
+    value: ${{ steps.determine.outputs.prerelease }}
+  tag:
+    description: The tag that was considered eligible for release.
+    value: ${{ steps.determine.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine whether to create a release
+      id: determine
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        TAG="${GITHUB_REF_NAME}"
+        RELEASE_BETA_TAGS='${{ inputs.release_beta_tags }}'
+
+        STABLE_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        BETA_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$'
+
+        SHOULD_RELEASE="false"
+        PRERELEASE="false"
+        OUT_TAG=""
+        MSG="INFO: ref is not an eligible release tag; skipping: ${TAG}"
+
+        if [[ "$TAG" =~ $STABLE_RE ]]; then
+          SHOULD_RELEASE="true"
+          PRERELEASE="false"
+          OUT_TAG="${TAG}"
+          MSG="INFO: eligible stable tag detected: ${TAG}"
+        elif [[ "$TAG" =~ $BETA_RE ]]; then
+          if [[ "$RELEASE_BETA_TAGS" == "true" ]]; then
+            SHOULD_RELEASE="true"
+            PRERELEASE="true"
+            OUT_TAG="${TAG}"
+            MSG="INFO: eligible beta tag detected (release_beta_tags=true): ${TAG}"
+          else
+            MSG="INFO: beta tag detected but release_beta_tags=false; skipping: ${TAG}"
+          fi
+        fi
+
+        echo "${MSG}"
+        {
+          echo "should_release=${SHOULD_RELEASE}"
+          echo "prerelease=${PRERELEASE}"
+          echo "tag=${OUT_TAG}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Create GitHub Release
+      if: ${{ steps.determine.outputs.should_release == 'true' }}
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.determine.outputs.tag }}
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ steps.determine.outputs.prerelease == 'true' }}
+
+
