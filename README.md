@@ -109,4 +109,5 @@ Each release creates `<action>/vN` and moves `<action>/latest`.
 | check-semver | [check-semver/v2](docs/check-semver/v2.md) | [Documentation](docs/check-semver/v2.md) |
 | docker-build | [docker-build/v2](docs/docker-build/v2.md) | [Documentation](docs/docker-build/v2.md) |
 | enforce-pr-label | [enforce-pr-label/v1](docs/enforce-pr-label/v1.md) | [Documentation](docs/enforce-pr-label/v1.md) |
+| github-release | [github-release/v1](docs/github-release/v1.md) | [Documentation](docs/github-release/v1.md) |
 <!-- LATEST_TAGS_END -->
