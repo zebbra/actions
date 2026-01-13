@@ -177,8 +177,8 @@ jobs:
           git add README.md docs || true
           git add "${SELECTED_ACTION}/README.md" 2>/dev/null || true
           if git diff --cached --quiet; then
-            echo "No README changes to commit"
-            exit 0
+            echo "No README/docs changes to commit; failing to avoid tagging without docs refresh" >&2
+            exit 1
           fi
           git commit -m "docs(${SELECTED_ACTION}): add ${SELECTED_ACTION} docs and refresh Latest tags/index"
           git push
@@ -193,6 +193,8 @@ jobs:
           git fetch --tags --force || true
           action="$SELECTED_ACTION"
           next="$RESOLVED_VERSION"
+          release_sha=$(git rev-parse HEAD)
+          echo "Release commit: $release_sha"
           if [ -z "$next" ]; then
             echo "Resolved version is empty" >&2
             exit 1
@@ -202,14 +204,14 @@ jobs:
             echo "Tag already exists: $action/$next" >&2
             exit 1
           fi
-          echo "Releasing $action/$next at $GITHUB_SHA"
-          git tag -a "$action/$next" -m "Release $action $next ($GITHUB_SHA)"
+          echo "Releasing $action/$next at $release_sha"
+          git tag -a "$action/$next" -m "Release $action $next ($release_sha)" "$release_sha"
           git push origin "$action/$next"
           # Move latest pointer
           if git rev-parse -q --verify "refs/tags/$action/latest" >/dev/null; then
-            git tag -fa "$action/latest" -m "Move $action/latest -> $GITHUB_SHA" "$GITHUB_SHA"
+            git tag -fa "$action/latest" -m "Move $action/latest -> $release_sha" "$release_sha"
           else
-            git tag -a "$action/latest" -m "Create $action/latest at $GITHUB_SHA" "$GITHUB_SHA"
+            git tag -a "$action/latest" -m "Create $action/latest at $release_sha" "$release_sha"
           fi
           git push origin --force "$action/latest"
 
