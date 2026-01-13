@@ -28,20 +28,25 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Skip semver check on non-tag refs
+    - name: Fail on non-tag refs
       if: ${{ github.ref_type != 'tag' }}
       shell: bash
       run: |
         set -euo pipefail
-        echo "SemVer check skipped: ref type '${GITHUB_REF_TYPE:-unknown}'"
-        {
-          echo "## Check SemVer"
-          echo "⏭️ Skipped: Non-tag ref"
-          echo ""
-          echo "- Ref type: ${GITHUB_REF_TYPE:-unknown}"
-          echo "- Ref name: ${GITHUB_REF_NAME:-unknown}"
-          echo "- Validation runs only for tags."
-        } >> "${GITHUB_STEP_SUMMARY}"
+        REF_TYPE="${GITHUB_REF_TYPE:-unknown}"
+        REF_NAME="${GITHUB_REF_NAME:-unknown}"
+        echo "SemVer check requires a tag ref; got '${REF_TYPE}' (${REF_NAME})."
+        if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+          {
+            echo "## Check SemVer"
+            echo "🚫 Failed: Github ref is not a tag"
+            echo "- Ref type: ${REF_TYPE}"
+            echo "- Ref name: ${REF_NAME}"
+            echo "- This action is only supported on tag refs. Please don't run it on any other refs (e.g. branches, pull requests, etc.)."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+        fi
+        exit 1
 
     - name: Checkout repository (full history)
       if: ${{ github.ref_type == 'tag' }}

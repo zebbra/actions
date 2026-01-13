@@ -397,20 +397,22 @@ def main() -> None:
     ref_name = os.environ.get("GITHUB_REF_NAME", "")
 
     if ref_type != "tag":
-        logger.info(
-            "Ref type '%s' detected; semver validation runs only on tags.", ref_type
+        logger.error(
+            "🚫 Semver validation requires a tag ref, but '%s' was provided (name: '%s').",
+            ref_type or "unknown",
+            ref_name or "unknown",
         )
         append_summary(
             [
                 SUMMARY_HEADER,
-                "⏭️ Skipped: Non-tag ref",
+                "🚫 Failed: Ref is not a tag",
                 f"- Ref type: {ref_type or 'unknown'}",
                 f"- Ref name: {ref_name or 'unknown'}",
-                "- Validation runs only for tags.",
+                "- This action only validates annotated or lightweight tags.",
                 "",
             ]
         )
-        sys.exit(0)
+        sys.exit(1)
 
     if not ref_name:
         logger.error("GITHUB_REF_NAME is empty; cannot determine tag for validation.")
@@ -434,7 +436,7 @@ def main() -> None:
         append_summary(
             [
                 SUMMARY_HEADER,
-                "🚫 Failed: Invalid semantic version",
+                "🚫 Failed: Tag is not a valid semantic version",
                 f"- Ref: tag `{ref_name}`",
                 f"- Error: {exc}",
                 "",

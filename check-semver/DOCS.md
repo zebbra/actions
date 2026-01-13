@@ -39,6 +39,11 @@ To enable branch-aware mode:
     allow_backports: 'true'
 ```
 
+## Required refs and tag format
+
+- The action must run on a tag ref; branch or PR refs fail with a summary entry explaining the unsupported ref type.
+- Tags must be valid semantic versions (with optional leading `v`, e.g., `v1.2.3`); invalid tags fail fast and annotate the GitHub summary with the error and the tag name.
+
 ## Example Output
 
 ### Success (Strict Mode)
