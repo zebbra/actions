@@ -35,7 +35,7 @@ The following actions are currently available in this repository:
 | check-semver | [check-semver/v4](docs/check-semver/v4.md) | [Documentation](docs/check-semver/v4.md) |
 | docker-build | [docker-build/v3](docs/docker-build/v3.md) | [Documentation](docs/docker-build/v3.md) |
 | enforce-pr-label | [enforce-pr-label/v1](docs/enforce-pr-label/v1.md) | [Documentation](docs/enforce-pr-label/v1.md) |
-| github-release | [github-release/v3](docs/github-release/v3.md) | [Documentation](docs/github-release/v3.md) |
+| github-release | [github-release/v4](docs/github-release/v4.md) | [Documentation](docs/github-release/v4.md) |
 <!-- LATEST_TAGS_END -->
 
 ## Creating Actions
