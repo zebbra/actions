@@ -84,18 +84,59 @@ runs:
 
         REF="${GITHUB_REF_NAME}"
 
+        SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-}"
+
         if [[ '${{ steps.determine.outputs.should_release }}' == "true" ]]; then
           TAG='${{ steps.determine.outputs.tag }}'
           PRERELEASE='${{ steps.determine.outputs.prerelease }}'
+          HTML_URL='${{ steps.release.outputs.html_url }}'
+
+          if [[ -n "${SUMMARY_FILE}" ]]; then
+            {
+              echo "## 🚀 GitHub Release"
+              echo
+              echo "- Status: ✅ success"
+              echo "- Tag: \`${TAG}\`"
+              echo "- Prerelease: ${PRERELEASE}"
+              if [[ -n "${HTML_URL}" ]]; then
+                echo "- Release: [View release](${HTML_URL})"
+              else
+                echo "- Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+              fi
+            } >> "${SUMMARY_FILE}"
+          fi
+
           echo "::notice title=GitHub-Release: done::Created GitHub Release for ${TAG} (prerelease=${PRERELEASE})"
           exit 0
         fi
 
         SKIP_REASON='${{ steps.determine.outputs.skip_reason }}'
 
+        if [[ "${SUMMARY_FILE}" != "" ]]; then
+          {
+            echo "## 🚀 GitHub Release"
+            echo
+            echo "- Status: ⚪ skipped"
+          } >> "${SUMMARY_FILE}"
+        fi
+
         if [[ "${SKIP_REASON}" == "beta_disabled" ]]; then
+          if [[ "${SUMMARY_FILE}" != "" ]]; then
+            {
+              echo "- Reason: beta tag ignored because release_beta_tags=false"
+              echo "- Tag: \`${REF}\`"
+            } >> "${SUMMARY_FILE}"
+          fi
+
           echo "::notice title=GitHub-Release: skipped (beta disabled)::Beta tag detected but release_beta_tags=false; skipping: ${REF}"
           exit 0
+        fi
+
+        if [[ "${SUMMARY_FILE}" != "" ]]; then
+          {
+            echo "- Reason: ref is not an eligible release tag"
+            echo "- Ref: \`${REF}\`"
+          } >> "${SUMMARY_FILE}"
         fi
 
         echo "::notice title=GitHub-Release: skipped::Ref is not an eligible release tag; skipping: ${REF}"
