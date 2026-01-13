@@ -31,6 +31,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+SUMMARY_HEADER = "## Check SemVer"
 
 
 def get_allow_backports() -> bool:
@@ -61,6 +62,51 @@ class TagInfo:
     def formatted_date(self) -> str:
         """Returns human-readable date string."""
         return datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def strip_v_prefix(tag_name: str) -> str:
+    """
+    Remove a leading 'v'/'V' from tags that use the common v-prefix pattern.
+
+    The prefix is only stripped when followed by a digit to avoid mangling tags
+    such as "version" or similar strings.
+    """
+    if (
+        tag_name
+        and tag_name[0].lower() == "v"
+        and len(tag_name) > 1
+        and tag_name[1].isdigit()
+    ):
+        return tag_name[1:]
+    return tag_name
+
+
+def parse_tag_version(tag_name: str) -> version.Version:
+    """
+    Parse a tag name into a packaging.version.Version instance, allowing v-prefixes.
+
+    Raises:
+        version.InvalidVersion: if the tag is not a valid semantic version.
+    """
+    normalized = strip_v_prefix(tag_name)
+    return version.Version(normalized)
+
+
+def append_summary(lines: list[str]) -> None:
+    """
+    Append lines to the GitHub step summary when available.
+
+    The function is intentionally quiet if the summary file is not present to
+    keep local runs uncluttered.
+    """
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        logger.debug("GITHUB_STEP_SUMMARY is not set; skipping summary write.")
+        return
+
+    with open(summary_path, "a", encoding="utf-8") as summary_file:
+        summary_file.write("\n".join(lines))
+        summary_file.write("\n")
 
 
 @dataclass
@@ -160,7 +206,7 @@ def parse_semver_tags(raw_tags: list[tuple[str, int]]) -> list[TagInfo]:
 
     for tag_name, timestamp in raw_tags:
         try:
-            parsed_version = version.parse(tag_name)
+            parsed_version = parse_tag_version(tag_name)
             semver_tags.append(
                 TagInfo(name=tag_name, timestamp=timestamp, version=parsed_version)
             )
@@ -347,10 +393,63 @@ def print_success_report(tags: list[TagInfo], allow_backports: bool) -> None:
 
 def main() -> None:
     """Main entry point for semver validation."""
+    ref_type = os.environ.get("GITHUB_REF_TYPE", "").lower()
+    ref_name = os.environ.get("GITHUB_REF_NAME", "")
+
+    if ref_type != "tag":
+        logger.info(
+            "Ref type '%s' detected; semver validation runs only on tags.", ref_type
+        )
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "⏭️ Skipped: Non-tag ref",
+                f"- Ref type: {ref_type or 'unknown'}",
+                f"- Ref name: {ref_name or 'unknown'}",
+                "- Validation runs only for tags.",
+                "",
+            ]
+        )
+        sys.exit(0)
+
+    if not ref_name:
+        logger.error("GITHUB_REF_NAME is empty; cannot determine tag for validation.")
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "🚫 Failed: Missing tag name",
+                "- Ref: not available",
+                "- Error: GITHUB_REF_NAME was not provided.",
+                "",
+            ]
+        )
+        sys.exit(1)
+
+    try:
+        current_version = parse_tag_version(ref_name)
+    except version.InvalidVersion as exc:
+        logger.error(
+            "🚫 Tag '%s' is not a valid semantic version: %s", ref_name, str(exc)
+        )
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "🚫 Failed: Invalid semantic version",
+                f"- Ref: tag `{ref_name}`",
+                f"- Error: {exc}",
+                "",
+            ]
+        )
+        sys.exit(1)
+
     # Check configuration
     allow_backports = get_allow_backports()
 
-    logger.info("🔍 Starting semver order validation...")
+    logger.info(
+        "🔍 Starting semver order validation for tag '%s' (version '%s')...",
+        ref_name,
+        current_version,
+    )
     if allow_backports:
         logger.info("   Mode: branch-aware (backports allowed)")
     else:
@@ -365,6 +464,15 @@ def main() -> None:
 
     if not raw_tags:
         logger.info("ℹ️  No tags found in repository. Nothing to validate.")
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "ℹ️ Info: No tags found",
+                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                "- No tags were available to validate.",
+                "",
+            ]
+        )
         sys.exit(0)
 
     # Step 3: Parse and filter to valid semver tags (O(n))
@@ -372,7 +480,16 @@ def main() -> None:
 
     if not semver_tags:
         logger.info("ℹ️  No valid semver tags found. Nothing to validate.")
-        sys.exit(0)
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "🚫 Failed: No valid semver tags found",
+                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                "- Unable to validate ordering because no semver tags were detected.",
+                "",
+            ]
+        )
+        sys.exit(1)
 
     # Step 4: Verify order based on mode
     all_violations: list[Violation] = []
@@ -391,9 +508,32 @@ def main() -> None:
     # Step 5: Report results
     if all_violations:
         print_violation_report(all_violations, allow_backports)
+        first_violation = all_violations[0]
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "🚫 Failed: SemVer ordering violation",
+                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
+                f"- Violations detected: {len(all_violations)}",
+                f"- Example: {first_violation.later_tag.name} after {first_violation.earlier_tag.name} ({first_violation.series})",
+                "",
+            ]
+        )
         sys.exit(1)
     else:
         print_success_report(semver_tags, allow_backports)
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "✅ Passed: SemVer ordering verified",
+                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
+                f"- Tags validated: {len(semver_tags)}",
+                f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
+                "",
+            ]
+        )
         sys.exit(0)
 
 

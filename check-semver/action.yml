@@ -28,21 +28,40 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Skip semver check on non-tag refs
+      if: ${{ github.ref_type != 'tag' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "SemVer check skipped: ref type '${GITHUB_REF_TYPE:-unknown}'"
+        {
+          echo "## Check SemVer"
+          echo "⏭️ Skipped: Non-tag ref"
+          echo ""
+          echo "- Ref type: ${GITHUB_REF_TYPE:-unknown}"
+          echo "- Ref name: ${GITHUB_REF_NAME:-unknown}"
+          echo "- Validation runs only for tags."
+        } >> "${GITHUB_STEP_SUMMARY}"
+
     - name: Checkout repository (full history)
+      if: ${{ github.ref_type == 'tag' }}
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
     - name: Setup Python
+      if: ${{ github.ref_type == 'tag' }}
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
     - name: Install Python dependencies
+      if: ${{ github.ref_type == 'tag' }}
       shell: bash
       run: pip install -r "${{ github.action_path }}/requirements.txt"
 
     - name: Check semver integrity
+      if: ${{ github.ref_type == 'tag' }}
       shell: bash
       env:
         ALLOW_BACKPORTS: ${{ inputs.allow_backports }}
@@ -50,6 +69,7 @@ runs:
 
     - name: Calculate version tags
       id: version
+      if: ${{ github.ref_type == 'tag' }}
       shell: bash
       run: |
         set -euo pipefail
