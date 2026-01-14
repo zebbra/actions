@@ -1,4 +1,4 @@
-# `github-release/v5` - GitHub release (stable semver tags by default)
+# `github-release/v2` - GitHub release (stable semver tags by default)
 
 Create a GitHub Release for eligible tags (stable semver by default; optionally include beta tags).
 
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: zebbra/actions/github-release@github-release/v5
+      - uses: zebbra/actions/github-release@github-release/v2
       # with:
       #   <input_name>: <value>
 ```
@@ -43,17 +43,17 @@ If the current `GITHUB_REF_NAME` is not an eligible tag, the action **does nothi
 
 ## Technical
 - runs.using: `composite`
-- action path: [github-release/action.yml](https://github.com/zebbra/actions/blob/github-release/v5/github-release/action.yml)
+- action path: [github-release/action.yml](https://github.com/zebbra/actions/blob/github-release/v2/github-release/action.yml)
 
 ### Referenced actions
 - `softprops/action-gh-release@v2`
 
 ### Files
-- [github-release/README.md](https://github.com/zebbra/actions/blob/github-release/v5/github-release/README.md)
-- [github-release/action.yml](https://github.com/zebbra/actions/blob/github-release/v5/github-release/action.yml)
+- [github-release/README.md](https://github.com/zebbra/actions/blob/github-release/v2/github-release/README.md)
+- [github-release/action.yml](https://github.com/zebbra/actions/blob/github-release/v2/github-release/action.yml)
 
 ## Other versions
 - [v1](./v1.md)
-- [v2](./v2.md)
 - [v3](./v3.md)
 - [v4](./v4.md)
+- [v5](./v5.md)
