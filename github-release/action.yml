@@ -103,6 +103,7 @@ runs:
                 echo "- The release was marked as a **prerelease** (beta tag)."
               else
                 echo "- The release was marked as a **stable** release."
+              fi
               if [[ -n "${HTML_URL}" ]]; then
                 echo "- **View release:** [${HTML_URL}](${HTML_URL})"
               else
