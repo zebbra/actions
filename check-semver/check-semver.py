@@ -67,6 +67,45 @@ def is_deleted_ref_event(event: dict) -> bool:
     return bool(deleted) if deleted is not None else False
 
 
+def remote_tag_exists(tag_name: str, remote: str = "origin") -> bool:
+    """
+    Check whether a tag exists on the given git remote.
+
+    Notes:
+        - This is stricter than checking local refs because the checkout step may
+          recreate local tag refs from the event SHA even if the tag was deleted
+          on the remote before this script runs.
+    """
+    # If origin isn't configured (e.g. local runs), skip the remote check.
+    remote_url = subprocess.run(
+        ["git", "remote", "get-url", remote],
+        capture_output=True,
+        text=True,
+    )
+    if remote_url.returncode != 0:
+        logger.warning(
+            "⚠️  Remote '%s' is not configured; skipping remote tag existence check.",
+            remote,
+        )
+        return True
+
+    ref = f"refs/tags/{tag_name}"
+    result = subprocess.run(
+        ["git", "ls-remote", "--tags", "--refs", remote, ref],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(
+            "🚫 Failed to query remote tags on '%s': %s",
+            remote,
+            (result.stderr or "").strip() or "unknown error",
+        )
+        return False
+
+    return bool((result.stdout or "").strip())
+
+
 @dataclass
 class TagInfo:
     """Structured representation of a git tag with semver metadata."""
@@ -502,6 +541,23 @@ def main() -> None:
 
     # Step 2: Fetch all tags with timestamps (single git command, O(n))
     raw_tags = fetch_tags_with_timestamps()
+
+    # Ensure the triggering tag exists on the remote at runtime (non-delete events).
+    if not deleted_event and not remote_tag_exists(ref_name):
+        logger.error(
+            "🚫 Tag '%s' is not present on the remote. It may have been deleted after the workflow was triggered.",
+            ref_name,
+        )
+        append_summary(
+            [
+                SUMMARY_HEADER,
+                "🚫 Failed: Trigger tag no longer exists on remote",
+                f"- Ref: tag `{ref_name}`",
+                "- Reason: tag was not found on remote (`git ls-remote --tags --refs origin`)",
+                "",
+            ]
+        )
+        sys.exit(1)
 
     # Ensure the triggering tag still exists (it may have been deleted after the run started).
     tag_names = {name for name, _ts in raw_tags}
