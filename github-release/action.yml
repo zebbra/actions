@@ -76,7 +76,7 @@ runs:
         draft: false
         prerelease: ${{ steps.determine.outputs.prerelease == 'true' }}
 
-    - name: Annotate result
+    - name: Write summary
       if: ${{ steps.determine.outputs.should_release != 'true' || steps.release.outcome == 'success' }}
       shell: bash
       run: |
@@ -105,8 +105,6 @@ runs:
               fi
             } >> "${SUMMARY_FILE}"
           fi
-
-          echo "::notice title=GitHub-Release: done::Created GitHub Release for ${TAG} (prerelease=${PRERELEASE})"
           exit 0
         fi
 
@@ -127,8 +125,6 @@ runs:
               echo "- Tag: \`${REF}\`"
             } >> "${SUMMARY_FILE}"
           fi
-
-          echo "::notice title=GitHub-Release: skipped (beta disabled)::Beta tag detected but release_beta_tags=false; skipping: ${REF}"
           exit 0
         fi
 
@@ -138,7 +134,4 @@ runs:
             echo "- Ref: \`${REF}\`"
           } >> "${SUMMARY_FILE}"
         fi
-
-        echo "::notice title=GitHub-Release: skipped::Ref is not an eligible release tag; skipping: ${REF}"
-
-
+        
