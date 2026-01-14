@@ -503,6 +503,30 @@ def main() -> None:
     # Step 2: Fetch all tags with timestamps (single git command, O(n))
     raw_tags = fetch_tags_with_timestamps()
 
+    # Ensure the triggering tag still exists (it may have been deleted after the run started).
+    tag_names = {name for name, _ts in raw_tags}
+    if ref_name not in tag_names:
+        if deleted_event:
+            logger.info(
+                "ℹ️  Tag '%s' is not present in repository tags (expected for deletion events).",
+                ref_name,
+            )
+        else:
+            logger.error(
+                "🚫 Tag '%s' is not present in repository tags. It may have been deleted after the workflow started.",
+                ref_name,
+            )
+            append_summary(
+                [
+                    SUMMARY_HEADER,
+                    "🚫 Failed: Trigger tag no longer exists",
+                    f"- Ref: tag `{ref_name}`",
+                    "- Reason: tag was not found in `refs/tags` during validation",
+                    "",
+                ]
+            )
+            sys.exit(1)
+
     if not raw_tags:
         logger.info("ℹ️  No tags found in repository. Nothing to validate.")
         append_summary(
