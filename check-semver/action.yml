@@ -10,6 +10,14 @@ inputs:
       strict global ordering is enforced.
     required: false
     default: 'false'
+  fail_on_deleted:
+    description: |
+      When true (default), fail the workflow on tag deletion push events (e.g.
+      `git push --delete origin v1.2.3`), while still reporting whether SemVer
+      ordering is intact. When false, succeed on deletion events if SemVer order
+      is intact.
+    required: false
+    default: 'true'
 
 outputs:
   version:
@@ -49,9 +57,18 @@ runs:
         exit 1
 
     - name: Checkout repository (full history)
-      if: ${{ github.ref_type == 'tag' }}
+      if: ${{ github.ref_type == 'tag' && github.event.deleted != true }}
       uses: actions/checkout@v4
       with:
+        fetch-depth: 0
+
+    - name: Checkout repository (full history; deleted tag event)
+      if: ${{ github.ref_type == 'tag' && github.event.deleted == true }}
+      uses: actions/checkout@v4
+      with:
+        # When a tag is deleted, the ref no longer exists, so we cannot check it out.
+        # We check out the default branch instead to fetch tags and validate ordering.
+        ref: ${{ github.event.repository.default_branch }}
         fetch-depth: 0
 
     - name: Setup Python
@@ -70,6 +87,7 @@ runs:
       shell: bash
       env:
         ALLOW_BACKPORTS: ${{ inputs.allow_backports }}
+        FAIL_ON_DELETED: ${{ inputs.fail_on_deleted }}
       run: python "${{ github.action_path }}/check-semver.py"
 
     - name: Calculate version tags

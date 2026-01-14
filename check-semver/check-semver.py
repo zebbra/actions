@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections import defaultdict
 from packaging import version
+import json
 import subprocess
 import sys
 import os
@@ -33,16 +34,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 SUMMARY_HEADER = "## Check SemVer"
 
-
-def get_allow_backports() -> bool:
+def get_github_event() -> dict:
     """
-    Check if backport mode is enabled via environment variable.
+    Load the GitHub event payload from GITHUB_EVENT_PATH when available.
 
     Returns:
-        True if ALLOW_BACKPORTS is set to 'true' (case-insensitive), False otherwise.
+        The event payload dict, or {} if not available / unreadable.
     """
-    value = os.environ.get("ALLOW_BACKPORTS", "false").lower()
-    return value == "true"
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        logger.debug("GITHUB_EVENT_PATH is not set; skipping event payload read.")
+        return {}
+
+    try:
+        with open(event_path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except OSError as exc:
+        logger.warning("⚠️  Could not read GitHub event payload: %s", exc)
+        return {}
+    except json.JSONDecodeError as exc:
+        logger.warning("⚠️  Could not parse GitHub event payload JSON: %s", exc)
+        return {}
+
+
+def is_deleted_ref_event(event: dict) -> bool:
+    """
+    Detect whether the current workflow run was triggered by a ref deletion.
+
+    For push events, GitHub includes a top-level boolean field `deleted`.
+    """
+    deleted = event.get("deleted")
+    return bool(deleted) if deleted is not None else False
 
 
 @dataclass
@@ -395,6 +417,10 @@ def main() -> None:
     """Main entry point for semver validation."""
     ref_type = os.environ.get("GITHUB_REF_TYPE", "").lower()
     ref_name = os.environ.get("GITHUB_REF_NAME", "")
+    allow_backports = os.environ.get("ALLOW_BACKPORTS", "false").lower() == "true"
+    fail_on_deleted = os.environ.get("FAIL_ON_DELETED", "true").lower() == "true"
+    event = get_github_event()
+    deleted_event = is_deleted_ref_event(event)
 
     if ref_type != "tag":
         logger.error(
@@ -427,35 +453,48 @@ def main() -> None:
         )
         sys.exit(1)
 
+    current_version: version.Version | None = None
     try:
         current_version = parse_tag_version(ref_name)
     except version.InvalidVersion as exc:
-        logger.error(
-            "🚫 Tag '%s' is not a valid semantic version: %s", ref_name, str(exc)
-        )
-        append_summary(
-            [
-                SUMMARY_HEADER,
-                "🚫 Failed: Tag is not a valid semantic version",
-                f"- Ref: tag `{ref_name}`",
-                f"- Error: {exc}",
-                "",
-            ]
-        )
-        sys.exit(1)
-
-    # Check configuration
-    allow_backports = get_allow_backports()
+        # On deletion events, the deleted ref may not be relevant for integrity checks;
+        # we still validate the repository tags and report order.
+        if deleted_event:
+            logger.warning(
+                "⚠️  Deleted tag ref '%s' is not a valid semantic version: %s",
+                ref_name,
+                str(exc),
+            )
+        else:
+            logger.error(
+                "🚫 Tag '%s' is not a valid semantic version: %s", ref_name, str(exc)
+            )
+            append_summary(
+                [
+                    SUMMARY_HEADER,
+                    "🚫 Failed: Tag is not a valid semantic version",
+                    f"- Ref: tag `{ref_name}`",
+                    f"- Error: {exc}",
+                    "",
+                ]
+            )
+            sys.exit(1)
 
     logger.info(
         "🔍 Starting semver order validation for tag '%s' (version '%s')...",
         ref_name,
-        current_version,
+        current_version if current_version is not None else "unknown",
     )
     if allow_backports:
         logger.info("   Mode: branch-aware (backports allowed)")
     else:
         logger.info("   Mode: strict (no backports)")
+    if deleted_event:
+        logger.info("   Event: ref deletion detected (github.event.deleted=true)")
+        logger.info(
+            "   Policy: fail_on_deleted=%s",
+            "true" if fail_on_deleted else "false",
+        )
     logger.info("")
 
     # Step 1: Configure git for GitHub Actions environment
@@ -515,7 +554,7 @@ def main() -> None:
             [
                 SUMMARY_HEADER,
                 "🚫 Failed: SemVer ordering violation",
-                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
                 f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
                 f"- Violations detected: {len(all_violations)}",
                 f"- Example: {first_violation.later_tag.name} after {first_violation.earlier_tag.name} ({first_violation.series})",
@@ -525,11 +564,48 @@ def main() -> None:
         sys.exit(1)
     else:
         print_success_report(semver_tags, allow_backports)
+
+        if deleted_event:
+            if fail_on_deleted:
+                logger.error("")
+                logger.error("🚫 Failing due to tag deletion event (fail_on_deleted=true).")
+                logger.error("✅ SemVer order is intact.")
+                append_summary(
+                    [
+                        SUMMARY_HEADER,
+                        "🚫 Failed: Tag deletion event",
+                        f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+                        f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
+                        f"- SemVer order: intact (validated {len(semver_tags)} tags)",
+                        f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
+                        "- Reason: github.event.deleted=true and fail_on_deleted=true",
+                        "",
+                    ]
+                )
+                sys.exit(1)
+
+            logger.info("")
+            logger.info("✅ Tag deletion event ignored (fail_on_deleted=false).")
+            logger.info("✅ SemVer order is intact.")
+            append_summary(
+                [
+                    SUMMARY_HEADER,
+                    "✅ Passed: Tag deletion event ignored",
+                    f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+                    f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
+                    f"- SemVer order: intact (validated {len(semver_tags)} tags)",
+                    f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
+                    "- Note: github.event.deleted=true but fail_on_deleted=false",
+                    "",
+                ]
+            )
+            sys.exit(0)
+
         append_summary(
             [
                 SUMMARY_HEADER,
                 "✅ Passed: SemVer ordering verified",
-                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+                f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
                 f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
                 f"- Tags validated: {len(semver_tags)}",
                 f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",

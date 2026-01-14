@@ -44,6 +44,13 @@ To enable branch-aware mode:
 - The action must run on a tag ref; branch or PR refs fail with a summary entry explaining the unsupported ref type.
 - Tags must be valid semantic versions (with optional leading `v`, e.g., `v1.2.3`); invalid tags fail fast and annotate the GitHub summary with the error and the tag name.
 
+## Tag deletion events
+
+When a tag is deleted via a push deletion (e.g., `git push --delete origin v1.2.3`), GitHub sets `github.event.deleted=true`.
+
+- By default, the action **fails** on tag deletion events (`fail_on_deleted: 'true'`) while still reporting whether SemVer order is intact.
+- To **succeed** on deletion events (when the SemVer order is intact), set `fail_on_deleted: 'false'`.
+
 ## Example Output
 
 ### Success (Strict Mode)
