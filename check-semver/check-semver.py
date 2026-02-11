@@ -170,6 +170,54 @@ def append_summary(lines: list[str]) -> None:
         summary_file.write("\n")
 
 
+def append_github_outputs(outputs: dict[str, str]) -> None:
+    """
+    Append key/value pairs to the GitHub step output file when available.
+
+    The function is intentionally quiet if GITHUB_OUTPUT is not present to keep
+    local runs uncluttered.
+    """
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        logger.debug("GITHUB_OUTPUT is not set; skipping output write.")
+        return
+
+    with open(output_path, "a", encoding="utf-8") as output_file:
+        for key, value in outputs.items():
+            output_file.write(f"{key}={value}\n")
+
+    logger.info(
+        "📤 Exported outputs: %s",
+        ", ".join(f"{key}={value}" for key, value in outputs.items()),
+    )
+
+
+def derive_version_outputs(
+    ref_name: str,
+    current_version: version.Version | None,
+) -> dict[str, str]:
+    """Build output values for the currently processed tag."""
+    version_without_v = ref_name[1:] if ref_name.startswith("v") else ref_name
+
+    if current_version is not None:
+        major = str(current_version.major)
+        minor = str(current_version.minor)
+        major_minor = f"{major}.{minor}"
+    else:
+        # Fallback for edge cases where the deleted ref is not a semver tag.
+        parts = version_without_v.split(".")
+        major = parts[0] if len(parts) >= 1 else ""
+        minor = parts[1] if len(parts) >= 2 else ""
+        major_minor = ".".join(parts[:2]) if len(parts) >= 2 else version_without_v
+
+    return {
+        "version": version_without_v,
+        "major": major,
+        "minor": minor,
+        "major_minor": major_minor,
+    }
+
+
 @dataclass
 class Violation:
     """Represents a semver ordering violation."""
@@ -452,6 +500,45 @@ def print_success_report(tags: list[TagInfo], allow_backports: bool) -> None:
     logger.info("=" * 70)
 
 
+def compute_tag_flags(
+    semver_tags: list[TagInfo],
+    current_version: version.Version | None,
+) -> tuple[bool, bool]:
+    """
+    Determine whether the triggering tag is prerelease and latest stable.
+
+    Latest is determined by the highest stable semantic version in the
+    repository, ignoring all prerelease tags.
+    """
+    is_prerelease = bool(
+        current_version is not None and current_version.is_prerelease
+    )
+
+    if current_version is None:
+        logger.warning(
+            "⚠️  Could not evaluate latest-stable status because current version is unavailable."
+        )
+        return is_prerelease, False
+
+    stable_tags = [tag for tag in semver_tags if not tag.version.is_prerelease]
+    if not stable_tags:
+        logger.warning(
+            "⚠️  No stable semver tags found; marking is_latest=false for tag '%s'.",
+            current_version,
+        )
+        return is_prerelease, False
+
+    latest_stable = max(stable_tags, key=lambda tag: tag.version)
+    is_latest = current_version == latest_stable.version and not is_prerelease
+    logger.info(
+        "🏷️  Tag classification: is_prerelease=%s, is_latest=%s (latest stable=%s)",
+        "true" if is_prerelease else "false",
+        "true" if is_latest else "false",
+        latest_stable.name,
+    )
+    return is_prerelease, is_latest
+
+
 def main() -> None:
     """Main entry point for semver validation."""
     ref_type = os.environ.get("GITHUB_REF_TYPE", "").lower()
@@ -629,18 +716,20 @@ def main() -> None:
     # Step 5: Report results
     if all_violations:
         print_violation_report(all_violations, allow_backports)
-        first_violation = all_violations[0]
-        append_summary(
-            [
-                SUMMARY_HEADER,
-                "🚫 Failed: SemVer ordering violation",
-                f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
-                f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
-                f"- Violations detected: {len(all_violations)}",
-                f"- Example: {first_violation.later_tag.name} after {first_violation.earlier_tag.name} ({first_violation.series})",
-                "",
-            ]
-        )
+        summary_lines = [
+            SUMMARY_HEADER,
+            "🚫 Failed: SemVer ordering violation",
+            f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+            f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
+            f"- Violations detected: {len(all_violations)}",
+            "- Violations:",
+        ]
+        for violation in all_violations:
+            summary_lines.append(
+                f"  - {violation.later_tag.name} after {violation.earlier_tag.name} ({violation.series})"
+            )
+        summary_lines.append("")
+        append_summary(summary_lines)
         sys.exit(1)
     else:
         print_success_report(semver_tags, allow_backports)
@@ -667,6 +756,11 @@ def main() -> None:
             logger.info("")
             logger.info("✅ Tag deletion event ignored (fail_on_deleted=false).")
             logger.info("✅ SemVer order is intact.")
+            is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
+            step_outputs = derive_version_outputs(ref_name, current_version)
+            step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
+            step_outputs["is_latest"] = "true" if is_latest else "false"
+            append_github_outputs(step_outputs)
             append_summary(
                 [
                     SUMMARY_HEADER,
@@ -681,6 +775,11 @@ def main() -> None:
             )
             sys.exit(0)
 
+        is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
+        step_outputs = derive_version_outputs(ref_name, current_version)
+        step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
+        step_outputs["is_latest"] = "true" if is_latest else "false"
+        append_github_outputs(step_outputs)
         append_summary(
             [
                 SUMMARY_HEADER,

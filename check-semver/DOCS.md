@@ -5,7 +5,7 @@
 - **Configurable**: Choose between strict or branch-aware validation
 - **Informative output**: Detailed violation reports with suggested fixes
 - **Prerelease support**: Correctly handles prerelease versions (e.g., `1.0.0-alpha`, `1.0.0-beta`)
-- **Outputs**: exposes `version`, `major`, `minor`, and `major_minor` for usage in subsequent steps
+- **Outputs**: exposes `version`, `major`, `minor`, `major_minor`, `is_prerelease`, and `is_latest` for usage in subsequent steps (`is_latest` is based on the highest stable/non-prerelease SemVer tag)
 
 ## Validation Modes
 

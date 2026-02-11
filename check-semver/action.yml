@@ -22,16 +22,22 @@ inputs:
 outputs:
   version:
     description: "Version number without 'v' prefix (e.g., '1.2.3')"
-    value: ${{ steps.version.outputs.version }}
+    value: ${{ steps.semver.outputs.version }}
   major:
     description: "Major version number (e.g., '1')"
-    value: ${{ steps.version.outputs.major }}
+    value: ${{ steps.semver.outputs.major }}
   minor:
     description: "Minor version number (e.g., '2')"
-    value: ${{ steps.version.outputs.minor }}
+    value: ${{ steps.semver.outputs.minor }}
   major_minor:
     description: "Major.minor version (e.g., '1.2')"
-    value: ${{ steps.version.outputs.major_minor }}
+    value: ${{ steps.semver.outputs.major_minor }}
+  is_prerelease:
+    description: "Whether the triggering tag is a prerelease version ('true' or 'false')"
+    value: ${{ steps.semver.outputs.is_prerelease }}
+  is_latest:
+    description: "Whether the triggering tag is the highest stable semver tag ('true' or 'false')"
+    value: ${{ steps.semver.outputs.is_latest }}
 
 runs:
   using: composite
@@ -83,28 +89,10 @@ runs:
       run: pip install -r "${{ github.action_path }}/requirements.txt"
 
     - name: Check semver integrity
+      id: semver
       if: ${{ github.ref_type == 'tag' }}
       shell: bash
       env:
         ALLOW_BACKPORTS: ${{ inputs.allow_backports }}
         FAIL_ON_DELETED: ${{ inputs.fail_on_deleted }}
       run: python "${{ github.action_path }}/check-semver.py"
-
-    - name: Calculate version tags
-      id: version
-      if: ${{ github.ref_type == 'tag' }}
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        VERSION="${GITHUB_REF_NAME#v}"
-        MAJOR="${VERSION%%.*}"
-        MINOR="${VERSION#*.}"
-        MINOR="${MINOR%%.*}"
-        MAJOR_MINOR="${VERSION%.*}"
-        {
-          echo "version=${VERSION}"
-          echo "major=${MAJOR}"
-          echo "minor=${MINOR}"
-          echo "major_minor=${MAJOR_MINOR}"
-        } >> $GITHUB_OUTPUT
