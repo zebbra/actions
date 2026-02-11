@@ -19,7 +19,7 @@ inputs:
   push:
     description: |
       Push the built image to the registry (`true`/`false`).
-      Requires at least one tag to be enabled/provided (e.g., `include_tag_sha`, `include_tag_ref`, `latest_tag_on_main_push`, `nightly_tag_on_develop_push`, or `tags`).
+      Requires at least one tag to be enabled/provided (e.g., `include_tag_sha`, `include_tag_ref`, `include_tag_latest`, `branch_tags_on_push`, or `tags`).
     default: 'false'
   load:
     description: |
@@ -33,12 +33,12 @@ inputs:
   include_tag_ref:
     description: Include a tag based on the branch name (`true`/`false`).
     default: 'false'
-  latest_tag_on_main_push:
-    description: Add `latest` tag when pushing from `main` (`true`/`false`).
+  include_tag_latest:
+    description: Include the `latest` tag (`true`/`false`).
     default: 'false'
-  nightly_tag_on_develop_push:
-    description: Add `nightly` tag when pushing from `develop` (`true`/`false`).
-    default: 'false'
+  branch_tags_on_push:
+    description: Automatically add `main`/`develop` tags on branch pushes when branch matches (`true`/`false`).
+    default: 'true'
   tags:
     description: |
       Additional docker/metadata-action tag rules (multiline). Appended verbatim to the metadata-action `tags` input.
@@ -50,6 +50,8 @@ inputs:
     description: Value for `org.opencontainers.image.description` label
   extra_labels:
     description: Extra labels (multiline `key=value`), appended verbatim
+  quay_expires_after:
+    description: Optional value for `quay.expires-after` label (e.g., `20d`). Leave empty to skip this label.
   build_args:
     description: Additional build-args (multiline `KEY=VALUE`), appended verbatim
   cache_from_overrides:
@@ -143,20 +145,21 @@ runs:
         tags: |
           type=sha,enable=${{ inputs.include_tag_sha == 'true' }}
           type=ref,event=branch,enable=${{ inputs.include_tag_ref == 'true' }}
-          type=raw,value=latest,enable=${{ inputs.push == 'true' && inputs.latest_tag_on_main_push == 'true' && steps.branches.outputs.head == 'main' }}
-          type=raw,value=nightly,enable=${{ inputs.push == 'true' && inputs.nightly_tag_on_develop_push == 'true' && steps.branches.outputs.head == 'develop' }}
+          type=raw,value=latest,enable=${{ inputs.push == 'true' && inputs.include_tag_latest == 'true' }}
+          type=raw,value=main,enable=${{ inputs.push == 'true' && inputs.branch_tags_on_push == 'true' && github.ref_type == 'branch' && steps.branches.outputs.head == 'main' }}
+          type=raw,value=develop,enable=${{ inputs.push == 'true' && inputs.branch_tags_on_push == 'true' && github.ref_type == 'branch' && steps.branches.outputs.head == 'develop' }}
           ${{ inputs.tags }}
         labels: |
           ${{ inputs.description != '' && format('org.opencontainers.image.description={0}', inputs.description) || '' }}
           ${{ inputs.extra_labels }}
-          quay.expires-after=20d
+          ${{ inputs.quay_expires_after != '' && format('quay.expires-after={0}', inputs.quay_expires_after) || '' }}
 
     - name: Validate tags when pushing
       if: ${{ inputs.push == 'true' }}
       shell: bash
       run: |
         if [ -z "${{ steps.meta.outputs.tags }}" ]; then
-          echo "Error: push=true but no tags were generated. Enable at least one tag input (include_tag_sha/include_tag_ref/latest_tag_on_main_push/nightly_tag_on_develop_push or provide custom tags)." >&2
+          echo "Error: push=true but no tags were generated. Enable at least one tag input (include_tag_sha/include_tag_ref/include_tag_latest/branch_tags_on_push or provide custom tags)." >&2
           exit 1
         fi
 
