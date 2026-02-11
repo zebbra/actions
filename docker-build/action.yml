@@ -38,7 +38,7 @@ inputs:
     default: 'false'
   branch_tags_on_push:
     description: Automatically add `main`/`develop` tags on branch pushes when branch matches (`true`/`false`).
-    default: 'true'
+    default: 'false'
   tags:
     description: |
       Additional docker/metadata-action tag rules (multiline). Appended verbatim to the metadata-action `tags` input.
