@@ -35,6 +35,14 @@ CI enforces this on pull requests.
 - Do **not** include or duplicate auto-generated sections in `DOCS.md`: title/description, quick usage snippet, inputs table, outputs table, technical `runs.*` info, referenced actions, files list, other versions links.
 - Avoid H1 (`# ...`) headings in `DOCS.md` (the generator strips H1 lines).
 
+## Testing
+
+- When adding custom code (Python scripts, etc.), add tests alongside the action code.
+- Test files live in the action folder: `<action>/test_*.py` (pytest convention).
+- CI runs tests automatically for changed actions on PRs and pushes to main.
+- The release workflow gates on passing tests before publishing a new version.
+- Use real git repos in tests (via `tmp_path`) rather than mocking git commands, when testing git-dependent logic.
+
 ## How docs are generated (source of truth)
 
 - Trigger: `.github/workflows/release-action.yml`

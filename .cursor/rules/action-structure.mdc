@@ -8,5 +8,6 @@ rules:
     - Use bash in `run:` steps for small glue (parsing, gating, formatting) before reaching for Python.
     - Only add custom code when it meaningfully improves correctness or reduces complexity; keep it small, well-logged, and avoid unnecessary dependencies.
     - If code is necessary: pin dependencies (e.g., `requirements.txt`) and keep logs concise with appropriate loglevels.
+    - When adding custom code, add `test_*.py` alongside the action; CI and releases gate on pytest.
 ---
 

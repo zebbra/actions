@@ -139,6 +139,26 @@ jobs:
           echo "::endgroup::"
           echo "actions=$changed" >> "$GITHUB_OUTPUT"
 
+      - name: Run action tests
+        if: steps.changed.outputs.actions != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for a in ${{ steps.changed.outputs.actions }}; do
+            test_files=$(find "$a" -maxdepth 1 -name 'test_*.py' -o -name '*_test.py')
+            if [ -z "$test_files" ]; then
+              echo "No test files found for $a; skipping"
+              continue
+            fi
+            echo "::group::Testing $a"
+            pip install pytest
+            if [ -f "$a/requirements.txt" ]; then
+              pip install -r "$a/requirements.txt"
+            fi
+            pytest "$a" -v
+            echo "::endgroup::"
+          done
+
       - name: Validate composite action metadata (basic)
         if: steps.changed.outputs.actions != ''
         shell: bash

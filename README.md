@@ -48,6 +48,7 @@ Feel free to create new actions, each action lives in its own folder at the repo
 ├── action.yml          # Required: action definition
 ├── DOCS.md             # Optional: narrative docs (included in generated docs)
 ├── README.md           # Auto-generated: do not edit manually
+├── test_*.py           # Optional: pytest tests (run by CI and release gate)
 └── ...                 # Implementation files (scripts, dependencies, etc.)
 ```
 
@@ -59,6 +60,7 @@ Feel free to create new actions, each action lives in its own folder at the repo
   - **`runs`**: How the action executes
 - **`DOCS.md` (optional)**: Extended documentation that gets merged into the generated docs (examples, configuration details, gotchas).
 - **`*.py` (optional)**: Python implementation scripts (when bash isn’t sufficient).
+- **`test_*.py` (optional)**: Pytest tests for the action’s custom code. CI runs these automatically for changed actions, and the release workflow gates on them.
 - **`requirements.txt` (optional)**: Python dependencies for the action.
 - **`Dockerfile` (optional)**: Docker-based action implementation (when needed).
 

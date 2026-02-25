@@ -98,6 +98,24 @@ jobs:
 
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
+      - name: Run action tests (release gate)
+        shell: bash
+        env:
+          SELECTED_ACTION: ${{ steps.select.outputs.action }}
+        run: |
+          set -euo pipefail
+          action="$SELECTED_ACTION"
+          test_files=$(find "$action" -maxdepth 1 -name 'test_*.py' -o -name '*_test.py')
+          if [ -z "$test_files" ]; then
+            echo "No test files found for $action; skipping"
+            exit 0
+          fi
+          pip install pytest
+          if [ -f "$action/requirements.txt" ]; then
+            pip install -r "$action/requirements.txt"
+          fi
+          pytest "$action" -v
+
       - name: Generate versioned docs for action
         shell: bash
         run: |
