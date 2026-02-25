@@ -73,7 +73,7 @@ class GitRepo:
 def git_repo(tmp_path: Path) -> GitRepo:
     """Create a bare-bones git repository for testing."""
     repo = GitRepo(path=tmp_path)
-    repo.run("init")
+    repo.run("init", "-b", "main")
     repo.run("config", "user.email", "test@test.com")
     repo.run("config", "user.name", "Test")
     repo.commit("initial")
