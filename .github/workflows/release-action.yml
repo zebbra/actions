@@ -98,6 +98,11 @@ jobs:
 
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Run action tests (release gate)
         shell: bash
         env:
@@ -122,8 +127,7 @@ jobs:
           set -euo pipefail
           action="${{ steps.select.outputs.action }}"
           ver="${{ steps.resolve.outputs.version }}"
-          python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
-          python3 -m pip install pyyaml >/dev/null 2>&1
+          pip install pyyaml
           python3 .github/workflows/scripts/generate_action_docs.py "$action" "$ver"
 
       - name: Update README latest tags table

@@ -13,7 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  lint-and-build:
+  guard-docs:
+    name: Guard generated docs
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,8 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Guard generated docs (PRs)
-        if: github.event_name == 'pull_request'
+      - name: Check for edits to generated files
         shell: bash
         run: |
           set -euo pipefail
@@ -107,6 +108,15 @@ jobs:
             exit 1
           fi
 
+  test-and-validate:
+    name: Test and validate actions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Detect changed actions
         id: changed
         shell: bash
@@ -139,6 +149,12 @@ jobs:
           echo "::endgroup::"
           echo "actions=$changed" >> "$GITHUB_OUTPUT"
 
+      - name: Setup Python
+        if: steps.changed.outputs.actions != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Run action tests
         if: steps.changed.outputs.actions != ''
         shell: bash
@@ -159,7 +175,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Validate composite action metadata (basic)
+      - name: Validate composite action metadata
         if: steps.changed.outputs.actions != ''
         shell: bash
         run: |
@@ -196,4 +212,3 @@ jobs:
               echo "Skipping docker build for $a (no Dockerfile)"
             fi
           done
-
