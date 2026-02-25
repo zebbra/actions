@@ -2,28 +2,30 @@
 """
 check-semver.py - Verify semantic versioning order in git repositories.
 
-This script ensures that semantic version tags are in correct chronological order.
+This script ensures that semantic version tags respect the git commit graph:
+if commit A is an ancestor of commit B, then version(tag_A) < version(tag_B).
 
-Modes:
-  - STRICT (default): All tags must be in global semver order. No backports allowed.
-  - BRANCH_AWARE: Tags are grouped by major.minor series. Backports across series
-    are allowed (e.g., v1.0.1 after v1.1.0), but order within each series is enforced.
+Tags on unrelated branches (no ancestor/descendant relationship) are never
+compared, which naturally supports multi-branch workflows without configuration.
 
-Configuration:
-  Set ALLOW_BACKPORTS=true to enable branch-aware mode.
+Validation:
+  - Ancestor check: all semver tags reachable from the current tag's commit
+    must have a strictly lower version.
+  - Descendant check: all semver tags whose commits descend from the current
+    tag's commit must have a strictly higher version.
 
-Algorithm complexity: O(n log n) where n is the number of tags.
+Algorithm complexity: O(n) where n is the number of tags (two git traversals).
 """
 
 from dataclasses import dataclass
 from datetime import datetime
-from collections import defaultdict
 from packaging import version
 import json
 import subprocess
 import sys
 import os
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 SUMMARY_HEADER = "## Check SemVer"
+
 
 def get_github_event() -> dict:
     """
@@ -220,31 +223,30 @@ def derive_version_outputs(
 
 @dataclass
 class Violation:
-    """Represents a semver ordering violation."""
+    """Represents a semver ordering violation in the commit graph."""
 
-    series: str  # "global" for strict mode, or "major.minor" for branch-aware mode
-    earlier_tag: TagInfo
-    later_tag: TagInfo
+    kind: str  # "ancestor" or "descendant"
+    current_tag: TagInfo
+    other_tag: TagInfo
 
     def __str__(self) -> str:
-        if self.series == "global":
+        if self.kind == "ancestor":
             return (
-                f"{self.later_tag.name} (tagged {self.later_tag.formatted_date}) "
-                f"comes after {self.earlier_tag.name} (tagged {self.earlier_tag.formatted_date}) "
-                f"but has a lower version number"
+                f"{self.other_tag.name} (tagged {self.other_tag.formatted_date}) "
+                f"is an ancestor of {self.current_tag.name} but has version "
+                f"{self.other_tag.version} >= {self.current_tag.version}"
             )
         return (
-            f"In series {self.series}.x: "
-            f"{self.later_tag.name} (tagged {self.later_tag.formatted_date}) "
-            f"comes after {self.earlier_tag.name} (tagged {self.earlier_tag.formatted_date}) "
-            f"but has a lower version number"
+            f"{self.other_tag.name} (tagged {self.other_tag.formatted_date}) "
+            f"descends from {self.current_tag.name} but has version "
+            f"{self.other_tag.version} <= {self.current_tag.version}"
         )
 
 
 def configure_git_safe_directory() -> None:
     """Configure git safe.directory for GitHub Actions environment."""
     workspace = os.environ.get("GITHUB_WORKSPACE", "/github/workspace")
-    logger.debug(f"Configuring safe.directory: {workspace}")
+    logger.debug("Configuring safe.directory: %s", workspace)
 
     result = subprocess.run(
         ["git", "config", "--global", "--add", "safe.directory", workspace],
@@ -253,16 +255,43 @@ def configure_git_safe_directory() -> None:
     )
 
     if result.returncode != 0:
-        logger.error(f"🚫 Failed to configure git safe.directory: {result.stderr}")
+        logger.error("🚫 Failed to configure git safe.directory: %s", result.stderr)
         sys.exit(1)
 
 
-def fetch_tags_with_timestamps() -> list[tuple[str, int]]:
+def get_tag_commit_sha(tag_name: str) -> str:
+    """
+    Resolve a tag to the commit SHA it ultimately points to.
+
+    Handles both lightweight and annotated tags by dereferencing to the commit.
+
+    Raises:
+        SystemExit: If git command fails.
+    """
+    result = subprocess.run(
+        ["git", "rev-list", "-n", "1", tag_name],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(
+            "🚫 Failed to resolve tag '%s' to commit: %s",
+            tag_name,
+            (result.stderr or "").strip(),
+        )
+        sys.exit(1)
+
+    sha = result.stdout.strip()
+    logger.debug("Resolved tag '%s' to commit %s", tag_name, sha[:12])
+    return sha
+
+
+def fetch_all_tags_with_metadata() -> list[tuple[str, int]]:
     """
     Fetch all tags with their creation timestamps using a single git command.
 
     Returns:
-        List of (tag_name, timestamp) tuples, sorted by timestamp (oldest first).
+        List of (tag_name, timestamp) tuples.
 
     Raises:
         SystemExit: If git command fails.
@@ -280,7 +309,7 @@ def fetch_tags_with_timestamps() -> list[tuple[str, int]]:
     )
 
     if result.returncode != 0:
-        logger.error(f"🚫 Failed to fetch tags: {result.stderr}")
+        logger.error("🚫 Failed to fetch tags: %s", result.stderr)
         sys.exit(1)
 
     tags = []
@@ -294,13 +323,13 @@ def fetch_tags_with_timestamps() -> list[tuple[str, int]]:
                 timestamp = int(timestamp_str)
                 tags.append((tag_name, timestamp))
             except ValueError:
-                logger.warning(f"⚠️  Could not parse timestamp for tag: {tag_name}")
+                logger.warning("⚠️  Could not parse timestamp for tag: %s", tag_name)
 
-    logger.info(f"📋 Found {len(tags)} total tags in repository")
+    logger.info("📋 Found %d total tags in repository", len(tags))
     return tags
 
 
-def parse_semver_tags(raw_tags: list[tuple[str, int]]) -> list[TagInfo]:
+def parse_semver_tags(raw_tags: list[tuple[str, int]]) -> dict[str, TagInfo]:
     """
     Parse raw tags into TagInfo objects, filtering out non-semver tags.
 
@@ -308,200 +337,258 @@ def parse_semver_tags(raw_tags: list[tuple[str, int]]) -> list[TagInfo]:
         raw_tags: List of (tag_name, timestamp) tuples.
 
     Returns:
-        List of TagInfo objects for valid semver tags.
+        Dictionary mapping tag name to TagInfo for valid semver tags.
     """
-    semver_tags = []
+    semver_tags: dict[str, TagInfo] = {}
     invalid_count = 0
 
     for tag_name, timestamp in raw_tags:
         try:
             parsed_version = parse_tag_version(tag_name)
-            semver_tags.append(
-                TagInfo(name=tag_name, timestamp=timestamp, version=parsed_version)
+            semver_tags[tag_name] = TagInfo(
+                name=tag_name, timestamp=timestamp, version=parsed_version
             )
         except version.InvalidVersion:
             invalid_count += 1
-            logger.debug(f"Skipping non-semver tag: {tag_name}")
+            logger.debug("Skipping non-semver tag: %s", tag_name)
 
     if invalid_count > 0:
-        logger.info(f"⚠️  Skipped {invalid_count} non-semver tags")
+        logger.info("⚠️  Skipped %d non-semver tags", invalid_count)
 
-    logger.info(f"✓  Parsed {len(semver_tags)} valid semver tags")
+    logger.info("✓  Parsed %d valid semver tags", len(semver_tags))
     return semver_tags
 
 
-def group_by_major_minor(tags: list[TagInfo]) -> dict[str, list[TagInfo]]:
+def get_ancestor_tag_names(commit_sha: str) -> set[str]:
     """
-    Group tags by their major.minor version prefix.
+    Get all tag names reachable from the given commit (ancestors and self).
 
-    This enables branch-aware checking, allowing backports across different
-    release series while enforcing order within each series.
-
-    Args:
-        tags: List of TagInfo objects (should already be sorted by timestamp).
-
-    Returns:
-        Dictionary mapping major.minor strings to lists of TagInfo objects.
+    Uses `git tag --merged <sha>` which returns tags whose tagged commits
+    are ancestors of (or equal to) the given commit.
     """
-    groups: dict[str, list[TagInfo]] = defaultdict(list)
-
-    for tag in tags:
-        groups[tag.major_minor].append(tag)
-
-    logger.info(
-        f"📦 Grouped tags into {len(groups)} release series: {', '.join(sorted(groups.keys()))}"
+    t0 = time.monotonic()
+    result = subprocess.run(
+        ["git", "tag", "--merged", commit_sha],
+        capture_output=True,
+        text=True,
     )
-    return dict(groups)
+    elapsed_ms = (time.monotonic() - t0) * 1000
+
+    if result.returncode != 0:
+        logger.error(
+            "🚫 Failed to get ancestor tags for %s: %s",
+            commit_sha[:12],
+            (result.stderr or "").strip(),
+        )
+        sys.exit(1)
+
+    names = {
+        line.strip()
+        for line in result.stdout.strip().split("\n")
+        if line.strip()
+    }
+    logger.info(
+        "🔍 Found %d ancestor tags for %s (%.0fms)",
+        len(names),
+        commit_sha[:12],
+        elapsed_ms,
+    )
+    return names
 
 
-def verify_series_order(series: str, tags: list[TagInfo]) -> list[Violation]:
+def get_descendant_tag_names(commit_sha: str) -> set[str]:
     """
-    Verify that tags within a series are in correct semver order.
+    Get all tag names whose tagged commits are descendants of the given commit.
 
-    Tags are already sorted by timestamp (chronological order). This function
-    checks that the semver order matches the chronological order.
+    Uses `git tag --contains <sha>` which returns tags where the given commit
+    is reachable from the tag's commit.
+    """
+    t0 = time.monotonic()
+    result = subprocess.run(
+        ["git", "tag", "--contains", commit_sha],
+        capture_output=True,
+        text=True,
+    )
+    elapsed_ms = (time.monotonic() - t0) * 1000
+
+    if result.returncode != 0:
+        logger.error(
+            "🚫 Failed to get descendant tags for %s: %s",
+            commit_sha[:12],
+            (result.stderr or "").strip(),
+        )
+        sys.exit(1)
+
+    names = {
+        line.strip()
+        for line in result.stdout.strip().split("\n")
+        if line.strip()
+    }
+    logger.info(
+        "🔍 Found %d descendant tags for %s (%.0fms)",
+        len(names),
+        commit_sha[:12],
+        elapsed_ms,
+    )
+    return names
+
+
+def verify_graph_order(
+    current_tag: TagInfo,
+    semver_tags: dict[str, TagInfo],
+    ancestor_names: set[str],
+    descendant_names: set[str],
+) -> list[Violation]:
+    """
+    Verify semver ordering against the commit graph.
+
+    - Ancestor tags (reachable from current) must have version < current.
+    - Descendant tags (current reachable from them) must have version > current.
 
     Args:
-        series: The series identifier ("global" for strict mode, or "major.minor").
-        tags: List of TagInfo objects in chronological order.
+        current_tag: The tag being validated.
+        semver_tags: All semver tags keyed by name.
+        ancestor_names: Tag names reachable from current tag's commit (excluding self).
+        descendant_names: Tag names whose commits descend from current tag's commit (excluding self).
 
     Returns:
         List of Violation objects for any ordering issues found.
     """
-    violations = []
+    violations: list[Violation] = []
 
-    for i in range(len(tags) - 1):
-        current = tags[i]
-        next_tag = tags[i + 1]
-
-        # If next tag has lower version but came later chronologically, it's a violation
-        if next_tag.version < current.version:
+    for name in sorted(ancestor_names):
+        tag = semver_tags.get(name)
+        if tag is None:
+            continue
+        if tag.version >= current_tag.version:
             violations.append(
-                Violation(series=series, earlier_tag=current, later_tag=next_tag)
+                Violation(kind="ancestor", current_tag=current_tag, other_tag=tag)
+            )
+
+    for name in sorted(descendant_names):
+        tag = semver_tags.get(name)
+        if tag is None:
+            continue
+        if tag.version <= current_tag.version:
+            violations.append(
+                Violation(kind="descendant", current_tag=current_tag, other_tag=tag)
             )
 
     return violations
 
 
-def verify_global_order(tags: list[TagInfo]) -> list[Violation]:
-    """
-    Verify that all tags are in strict global semver order.
-
-    This is the strict mode - no backports allowed. Any tag with a lower
-    version number appearing after a higher version is a violation.
-
-    Args:
-        tags: List of TagInfo objects in chronological order.
-
-    Returns:
-        List of Violation objects for any ordering issues found.
-    """
-    return verify_series_order("global", tags)
-
-
-def print_violation_report(violations: list[Violation], allow_backports: bool) -> None:
+def print_violation_report(
+    violations: list[Violation],
+    current_tag: TagInfo,
+) -> None:
     """Print a detailed report of all violations with suggested fixes."""
+    ancestor_violations = [v for v in violations if v.kind == "ancestor"]
+    descendant_violations = [v for v in violations if v.kind == "descendant"]
+
     logger.error("")
     logger.error("=" * 70)
     logger.error("🚫 SEMVER ORDER VIOLATION DETECTED")
     logger.error("=" * 70)
 
-    # Group violations by series for cleaner output
-    by_series: dict[str, list[Violation]] = defaultdict(list)
-    for v in violations:
-        by_series[v.series].append(v)
-
-    for series, series_violations in sorted(by_series.items()):
+    if ancestor_violations:
         logger.error("")
-        if series == "global":
-            logger.error("📌 Global Order Violations (strict mode)")
-        else:
-            logger.error(f"📌 Series: {series}.x")
+        logger.error(
+            "📌 Ancestor violations (tags reachable from %s with "
+            "version >= %s):",
+            current_tag.name,
+            current_tag.version,
+        )
         logger.error("-" * 50)
+        for v in ancestor_violations:
+            logger.error("")
+            logger.error(
+                "  • %s (tagged %s) is an ancestor but has version %s",
+                v.other_tag.name,
+                v.other_tag.formatted_date,
+                v.other_tag.version,
+            )
+        logger.error("")
+        logger.error("  Suggested fix: use a version higher than all ancestors,")
+        highest = max(v.other_tag.version for v in ancestor_violations)
+        logger.error(
+            "  e.g. %s.%s.%s or higher.",
+            highest.major,
+            highest.minor,
+            highest.micro + 1,
+        )
 
-        for violation in series_violations:
-            logger.error("")
-            logger.error("  Problem:")
-            logger.error(
-                f"    • {violation.later_tag.name} was tagged on {violation.later_tag.formatted_date}"
-            )
-            logger.error(
-                f"    • {violation.earlier_tag.name} was tagged on {violation.earlier_tag.formatted_date}"
-            )
-            logger.error(
-                f"    • But {violation.later_tag.name} < {violation.earlier_tag.name} semantically"
-            )
-            logger.error("")
-            logger.error("  Suggested fixes:")
-            logger.error("    1. Delete the incorrect tag:")
-            logger.error(f"       git tag -d {violation.later_tag.name}")
-            logger.error(f"       git push --delete origin {violation.later_tag.name}")
+    if descendant_violations:
+        logger.error("")
+        logger.error(
+            "📌 Descendant violations (tags descending from %s with "
+            "version <= %s):",
+            current_tag.name,
+            current_tag.version,
+        )
+        logger.error("-" * 50)
+        for v in descendant_violations:
             logger.error("")
             logger.error(
-                f"    2. Or, if {violation.later_tag.name} should come after {violation.earlier_tag.name},"
+                "  • %s (tagged %s) descends from this commit but has "
+                "version %s",
+                v.other_tag.name,
+                v.other_tag.formatted_date,
+                v.other_tag.version,
             )
-
-            # Calculate suggested next version
-            suggested = f"{violation.earlier_tag.version.major}.{violation.earlier_tag.version.minor}.{violation.earlier_tag.version.micro + 1}"
-            logger.error(f"       consider re-tagging as {suggested} or higher")
+        logger.error("")
+        logger.error(
+            "  Suggested fix: delete %s and re-tag with a version lower "
+            "than all descendants,",
+            current_tag.name,
+        )
+        lowest = min(v.other_tag.version for v in descendant_violations)
+        if lowest.micro > 0:
+            logger.error(
+                "  or delete the descendant tags. Lowest descendant: %s",
+                lowest,
+            )
+        else:
+            logger.error(
+                "  or delete the descendant tags. Lowest descendant: %s",
+                lowest,
+            )
 
     logger.error("")
     logger.error("=" * 70)
-    if allow_backports:
-        logger.error(
-            f"Total: {len(violations)} violation(s) found across {len(by_series)} series"
-        )
-    else:
-        logger.error(f"Total: {len(violations)} violation(s) found")
-        logger.error("")
-        logger.error("💡 Tip: If you use backported releases (e.g., hotfixes to older")
-        logger.error(
-            "   branches), set ALLOW_BACKPORTS=true to enable branch-aware mode."
-        )
+    logger.error(
+        "Total: %d violation(s) found (%d ancestor, %d descendant)",
+        len(violations),
+        len(ancestor_violations),
+        len(descendant_violations),
+    )
     logger.error("=" * 70)
 
 
-def print_success_report(tags: list[TagInfo], allow_backports: bool) -> None:
+def print_success_report(
+    current_tag: TagInfo,
+    semver_tags: dict[str, TagInfo],
+    ancestor_count: int,
+    descendant_count: int,
+) -> None:
     """Print a summary of successfully validated tags."""
     logger.info("")
     logger.info("=" * 70)
     logger.info("✅ SEMVER ORDER VALIDATION PASSED")
     logger.info("=" * 70)
-
-    if allow_backports:
-        # Group by series for detailed output
-        groups: dict[str, list[TagInfo]] = defaultdict(list)
-        for tag in tags:
-            groups[tag.major_minor].append(tag)
-
-        logger.info(f"  Validated {len(tags)} tags across {len(groups)} release series")
-        logger.info("  Mode: branch-aware (backports allowed)")
-        logger.info("")
-
-        for series in sorted(groups.keys()):
-            series_tags = groups[series]
-            if series_tags:
-                first = series_tags[0].name
-                last = series_tags[-1].name
-                count = len(series_tags)
-                if count == 1:
-                    logger.info(f"  • {series}.x: {first}")
-                else:
-                    logger.info(f"  • {series}.x: {first} → {last} ({count} tags)")
-    else:
-        logger.info(f"  Validated {len(tags)} tags in strict global order")
-        logger.info("  Mode: strict (no backports)")
-        logger.info("")
-        if tags:
-            first = tags[0].name
-            last = tags[-1].name
-            logger.info(f"  • Range: {first} → {last}")
-
+    logger.info(
+        "  Tag: %s (version %s)", current_tag.name, current_tag.version
+    )
+    logger.info("  Total semver tags in repo: %d", len(semver_tags))
+    logger.info(
+        "  Checked %d ancestor tags and %d descendant tags",
+        ancestor_count,
+        descendant_count,
+    )
     logger.info("=" * 70)
 
 
 def compute_tag_flags(
-    semver_tags: list[TagInfo],
+    semver_tags: dict[str, TagInfo],
     current_version: version.Version | None,
 ) -> tuple[bool, bool]:
     """
@@ -520,7 +607,9 @@ def compute_tag_flags(
         )
         return is_prerelease, False
 
-    stable_tags = [tag for tag in semver_tags if not tag.version.is_prerelease]
+    stable_tags = [
+        tag for tag in semver_tags.values() if not tag.version.is_prerelease
+    ]
     if not stable_tags:
         logger.warning(
             "⚠️  No stable semver tags found; marking is_latest=false for tag '%s'.",
@@ -543,7 +632,6 @@ def main() -> None:
     """Main entry point for semver validation."""
     ref_type = os.environ.get("GITHUB_REF_TYPE", "").lower()
     ref_name = os.environ.get("GITHUB_REF_NAME", "")
-    allow_backports = os.environ.get("ALLOW_BACKPORTS", "false").lower() == "true"
     fail_on_deleted = os.environ.get("FAIL_ON_DELETED", "true").lower() == "true"
     event = get_github_event()
     deleted_event = is_deleted_ref_event(event)
@@ -611,10 +699,7 @@ def main() -> None:
         ref_name,
         current_version if current_version is not None else "unknown",
     )
-    if allow_backports:
-        logger.info("   Mode: branch-aware (backports allowed)")
-    else:
-        logger.info("   Mode: strict (no backports)")
+    logger.info("   Mode: git-graph ancestry (commit DAG)")
     if deleted_event:
         logger.info("   Event: ref deletion detected (github.event.deleted=true)")
         logger.info(
@@ -623,11 +708,9 @@ def main() -> None:
         )
     logger.info("")
 
-    # Step 1: Configure git for GitHub Actions environment
     configure_git_safe_directory()
 
-    # Step 2: Fetch all tags with timestamps (single git command, O(n))
-    raw_tags = fetch_tags_with_timestamps()
+    raw_tags = fetch_all_tags_with_metadata()
 
     # Ensure the triggering tag exists on the remote at runtime (non-delete events).
     if not deleted_event and not remote_tag_exists(ref_name):
@@ -683,7 +766,6 @@ def main() -> None:
         )
         sys.exit(0)
 
-    # Step 3: Parse and filter to valid semver tags (O(n))
     semver_tags = parse_semver_tags(raw_tags)
 
     if not semver_tags:
@@ -699,99 +781,103 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Step 4: Verify order based on mode
-    all_violations: list[Violation] = []
-
-    if allow_backports:
-        # Branch-aware mode: group by major.minor and check within each series
-        groups = group_by_major_minor(semver_tags)
-        for series, tags in groups.items():
-            violations = verify_series_order(series, tags)
-            all_violations.extend(violations)
-    else:
-        # Strict mode: verify global order across all tags
-        logger.info(f"🔒 Checking strict global order for {len(semver_tags)} tags")
-        all_violations = verify_global_order(semver_tags)
-
-    # Step 5: Report results
-    if all_violations:
-        print_violation_report(all_violations, allow_backports)
-        summary_lines = [
-            SUMMARY_HEADER,
-            "🚫 Failed: SemVer ordering violation",
-            f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
-            f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
-            f"- Violations detected: {len(all_violations)}",
-            "- Violations:",
-        ]
-        for violation in all_violations:
-            summary_lines.append(
-                f"  - {violation.later_tag.name} after {violation.earlier_tag.name} ({violation.series})"
-            )
-        summary_lines.append("")
-        append_summary(summary_lines)
-        sys.exit(1)
-    else:
-        print_success_report(semver_tags, allow_backports)
-
-        if deleted_event:
-            if fail_on_deleted:
-                logger.error("")
-                logger.error("🚫 Failing due to tag deletion event (fail_on_deleted=true).")
-                logger.error("✅ SemVer order is intact.")
-                append_summary(
-                    [
-                        SUMMARY_HEADER,
-                        "🚫 Failed: Tag deletion event",
-                        f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
-                        f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
-                        f"- SemVer order: intact (validated {len(semver_tags)} tags)",
-                        f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
-                        "- Reason: github.event.deleted=true and fail_on_deleted=true",
-                        "",
-                    ]
-                )
-                sys.exit(1)
-
-            logger.info("")
-            logger.info("✅ Tag deletion event ignored (fail_on_deleted=false).")
-            logger.info("✅ SemVer order is intact.")
-            is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
-            step_outputs = derive_version_outputs(ref_name, current_version)
-            step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
-            step_outputs["is_latest"] = "true" if is_latest else "false"
-            append_github_outputs(step_outputs)
-            append_summary(
-                [
-                    SUMMARY_HEADER,
-                    "✅ Passed: Tag deletion event ignored",
-                    f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
-                    f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
-                    f"- SemVer order: intact (validated {len(semver_tags)} tags)",
-                    f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
-                    "- Note: github.event.deleted=true but fail_on_deleted=false",
-                    "",
-                ]
-            )
-            sys.exit(0)
-
+    # --- Deletion events: skip graph validation ---
+    # Removing a tag cannot introduce a DAG ordering violation;
+    # just enforce the fail_on_deleted policy and emit outputs.
+    if deleted_event:
         is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
         step_outputs = derive_version_outputs(ref_name, current_version)
         step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
         step_outputs["is_latest"] = "true" if is_latest else "false"
+
+        if fail_on_deleted:
+            logger.error("")
+            logger.error("🚫 Failing due to tag deletion event (fail_on_deleted=true).")
+            append_summary(
+                [
+                    SUMMARY_HEADER,
+                    "🚫 Failed: Tag deletion event",
+                    f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+                    "- Reason: github.event.deleted=true and fail_on_deleted=true",
+                    "",
+                ]
+            )
+            sys.exit(1)
+
+        logger.info("")
+        logger.info("✅ Tag deletion event ignored (fail_on_deleted=false).")
         append_github_outputs(step_outputs)
         append_summary(
             [
                 SUMMARY_HEADER,
-                "✅ Passed: SemVer ordering verified",
+                "✅ Passed: Tag deletion event ignored",
                 f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
-                f"- Mode: {'branch-aware (backports allowed)' if allow_backports else 'strict (no backports)'}",
-                f"- Tags validated: {len(semver_tags)}",
-                f"- Range checked: {semver_tags[0].name} → {semver_tags[-1].name}",
+                "- Note: github.event.deleted=true but fail_on_deleted=false",
                 "",
             ]
         )
         sys.exit(0)
+
+    # --- Graph-based validation ---
+    commit_sha = get_tag_commit_sha(ref_name)
+    logger.info("📍 Tag '%s' points to commit %s", ref_name, commit_sha[:12])
+
+    ancestor_names = get_ancestor_tag_names(commit_sha) - {ref_name}
+    descendant_names = get_descendant_tag_names(commit_sha) - {ref_name}
+
+    ancestor_semver_count = len(
+        [n for n in ancestor_names if n in semver_tags]
+    )
+    descendant_semver_count = len(
+        [n for n in descendant_names if n in semver_tags]
+    )
+    logger.info(
+        "📊 Validating against %d ancestor semver tags and %d descendant semver tags",
+        ancestor_semver_count,
+        descendant_semver_count,
+    )
+
+    current_tag = semver_tags[ref_name]
+    violations = verify_graph_order(
+        current_tag, semver_tags, ancestor_names, descendant_names
+    )
+
+    if violations:
+        print_violation_report(violations, current_tag)
+        summary_lines = [
+            SUMMARY_HEADER,
+            "🚫 Failed: SemVer ordering violation",
+            f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+            "- Mode: git-graph ancestry (commit DAG)",
+            f"- Violations detected: {len(violations)}",
+            "- Violations:",
+        ]
+        for v in violations:
+            summary_lines.append(f"  - {v}")
+        summary_lines.append("")
+        append_summary(summary_lines)
+        sys.exit(1)
+
+    print_success_report(
+        current_tag, semver_tags, ancestor_semver_count, descendant_semver_count
+    )
+
+    is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
+    step_outputs = derive_version_outputs(ref_name, current_version)
+    step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
+    step_outputs["is_latest"] = "true" if is_latest else "false"
+    append_github_outputs(step_outputs)
+    append_summary(
+        [
+            SUMMARY_HEADER,
+            "✅ Passed: SemVer ordering verified",
+            f"- Ref: tag `{ref_name}` (version `{current_version}`)",
+            "- Mode: git-graph ancestry (commit DAG)",
+            f"- Tags validated: {len(semver_tags)} total, {ancestor_semver_count} ancestors, {descendant_semver_count} descendants",
+            "",
+        ]
+    )
+    sys.exit(0)
 
 
 if __name__ == "__main__":

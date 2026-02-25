@@ -3,13 +3,6 @@ description: "This action ensures that semantic version tags are in correct chro
 author: "Zebbra AG"
 
 inputs:
-  allow_backports:
-    description: |
-      Enable branch-aware mode that allows backported releases across different
-      major.minor series (e.g., v1.0.1 after v1.1.0). When false (default),
-      strict global ordering is enforced.
-    required: false
-    default: 'false'
   fail_on_deleted:
     description: |
       When true (default), fail the workflow on tag deletion push events (e.g.
@@ -93,6 +86,5 @@ runs:
       if: ${{ github.ref_type == 'tag' }}
       shell: bash
       env:
-        ALLOW_BACKPORTS: ${{ inputs.allow_backports }}
         FAIL_ON_DELETED: ${{ inputs.fail_on_deleted }}
       run: python "${{ github.action_path }}/check-semver.py"
