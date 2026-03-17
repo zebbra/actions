@@ -52,6 +52,15 @@ inputs:
     description: Extra labels (multiline `key=value`), appended verbatim
   quay_expires_after:
     description: Optional value for `quay.expires-after` label (e.g., `20d`). Leave empty to skip this label.
+  semver:
+    description: |
+      Semver version string (e.g., "1.2.3" or "1.2.3-beta.1").
+      Generates type=semver tags: {{version}}, {{major}}.{{minor}}, {{major}}.
+      Prerelease versions automatically get only the full version tag
+      (metadata-action natively suppresses major/minor for prereleases).
+      Also auto-sets quay_expires_after=20d for prereleases unless explicitly overridden.
+  semver_suffix:
+    description: Suffix appended to all semver-generated tags (e.g., "-bullseye"). Uses metadata-action's suffix= attribute.
   build_args:
     description: Additional build-args (multiline `KEY=VALUE`), appended verbatim
   cache_from_overrides:
@@ -148,11 +157,14 @@ runs:
           type=raw,value=latest,enable=${{ inputs.push == 'true' && inputs.include_tag_latest == 'true' }}
           type=raw,value=main,enable=${{ inputs.push == 'true' && inputs.branch_tags_on_push == 'true' && github.ref_type == 'branch' && steps.branches.outputs.head == 'main' }}
           type=raw,value=develop,enable=${{ inputs.push == 'true' && inputs.branch_tags_on_push == 'true' && github.ref_type == 'branch' && steps.branches.outputs.head == 'develop' }}
+          type=semver,pattern={{version}},value=${{ inputs.semver }},suffix=${{ inputs.semver_suffix }},enable=${{ inputs.semver != '' }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ inputs.semver }},suffix=${{ inputs.semver_suffix }},enable=${{ inputs.semver != '' }}
+          type=semver,pattern={{major}},value=${{ inputs.semver }},suffix=${{ inputs.semver_suffix }},enable=${{ inputs.semver != '' }}
           ${{ inputs.tags }}
         labels: |
           ${{ inputs.description != '' && format('org.opencontainers.image.description={0}', inputs.description) || '' }}
           ${{ inputs.extra_labels }}
-          ${{ inputs.quay_expires_after != '' && format('quay.expires-after={0}', inputs.quay_expires_after) || '' }}
+          ${{ (inputs.quay_expires_after != '' && format('quay.expires-after={0}', inputs.quay_expires_after)) || (inputs.semver != '' && contains(inputs.semver, '-') && 'quay.expires-after=20d') || '' }}
 
     - name: Validate tags when pushing
       if: ${{ inputs.push == 'true' }}
