@@ -33,7 +33,7 @@ The following actions are currently available in this repository:
 | Action | Latest version | Documentation |
 | ------ | -------------- | ------------- |
 | check-semver | [check-semver/v7](docs/check-semver/v7.md) | [Documentation](docs/check-semver/v7.md) |
-| docker-build | [docker-build/v5](docs/docker-build/v5.md) | [Documentation](docs/docker-build/v5.md) |
+| docker-build | [docker-build/v6](docs/docker-build/v6.md) | [Documentation](docs/docker-build/v6.md) |
 | enforce-pr-label | [enforce-pr-label/v1](docs/enforce-pr-label/v1.md) | [Documentation](docs/enforce-pr-label/v1.md) |
 | github-release | [github-release/v2](docs/github-release/v2.md) | [Documentation](docs/github-release/v2.md) |
 <!-- LATEST_TAGS_END -->
