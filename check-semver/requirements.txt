@@ -1,1 +1,1 @@
-packaging   
+semver>=3   
