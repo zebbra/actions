@@ -19,7 +19,7 @@ Algorithm complexity: O(n) where n is the number of tags (two git traversals).
 
 from dataclasses import dataclass
 from datetime import datetime
-from packaging import version
+import semver
 import json
 import subprocess
 import sys
@@ -115,7 +115,7 @@ class TagInfo:
 
     name: str
     timestamp: int
-    version: version.Version
+    version: semver.Version
 
     @property
     def major_minor(self) -> str:
@@ -145,15 +145,29 @@ def strip_v_prefix(tag_name: str) -> str:
     return tag_name
 
 
-def parse_tag_version(tag_name: str) -> version.Version:
+def parse_tag_version(tag_name: str) -> semver.Version:
     """
-    Parse a tag name into a packaging.version.Version instance, allowing v-prefixes.
+    Parse a tag name into a semver.Version instance (SemVer 2.0.0), allowing v-prefixes.
 
     Raises:
-        version.InvalidVersion: if the tag is not a valid semantic version.
+        ValueError: if the tag is not a valid semantic version.
     """
     normalized = strip_v_prefix(tag_name)
-    return version.Version(normalized)
+    return semver.Version.parse(normalized)
+
+
+def release_tags(semver_tags: dict[str, "TagInfo"]) -> dict[str, "TagInfo"]:
+    """
+    Customer-facing stable releases only: exclude prereleases and build metadata.
+
+    Ordering integrity is enforced against these tags alone; prerelease (`-beta.N`,
+    `-rc`, ...) and build-metadata (`+...`) tags are ignored for ordering.
+    """
+    return {
+        name: t
+        for name, t in semver_tags.items()
+        if not t.version.prerelease and not t.version.build
+    }
 
 
 def append_summary(lines: list[str]) -> None:
@@ -197,10 +211,10 @@ def append_github_outputs(outputs: dict[str, str]) -> None:
 
 def derive_version_outputs(
     ref_name: str,
-    current_version: version.Version | None,
+    current_version: semver.Version | None,
 ) -> dict[str, str]:
     """Build output values for the currently processed tag."""
-    version_without_v = ref_name[1:] if ref_name.startswith("v") else ref_name
+    version_without_v = strip_v_prefix(ref_name)
 
     if current_version is not None:
         major = str(current_version.major)
@@ -348,7 +362,7 @@ def parse_semver_tags(raw_tags: list[tuple[str, int]]) -> dict[str, TagInfo]:
             semver_tags[tag_name] = TagInfo(
                 name=tag_name, timestamp=timestamp, version=parsed_version
             )
-        except version.InvalidVersion:
+        except ValueError:
             invalid_count += 1
             logger.debug("Skipping non-semver tag: %s", tag_name)
 
@@ -477,6 +491,23 @@ def verify_graph_order(
     return violations
 
 
+def verify_repo_integrity(rel_tags: dict[str, TagInfo]) -> list[Violation]:
+    """
+    Fallback check used when the trigger tag is not a stable release (prerelease,
+    build metadata, or non-SemVer). Validate every release tag against its release
+    ancestors so genuinely out-of-order stable tags are still caught. Only ancestor
+    sets are checked, so each disordered pair is reported once.
+    """
+    violations: list[Violation] = []
+    for name, tag in rel_tags.items():
+        sha = get_tag_commit_sha(name)
+        ancestor_names = get_ancestor_tag_names(sha) - {name}
+        violations.extend(
+            verify_graph_order(tag, rel_tags, ancestor_names, set())
+        )
+    return violations
+
+
 def print_violation_report(
     violations: list[Violation],
     current_tag: TagInfo,
@@ -514,7 +545,7 @@ def print_violation_report(
             "  e.g. %s.%s.%s or higher.",
             highest.major,
             highest.minor,
-            highest.micro + 1,
+            highest.patch + 1,
         )
 
     if descendant_violations:
@@ -542,16 +573,10 @@ def print_violation_report(
             current_tag.name,
         )
         lowest = min(v.other_tag.version for v in descendant_violations)
-        if lowest.micro > 0:
-            logger.error(
-                "  or delete the descendant tags. Lowest descendant: %s",
-                lowest,
-            )
-        else:
-            logger.error(
-                "  or delete the descendant tags. Lowest descendant: %s",
-                lowest,
-            )
+        logger.error(
+            "  or delete the descendant tags. Lowest descendant: %s",
+            lowest,
+        )
 
     logger.error("")
     logger.error("=" * 70)
@@ -589,16 +614,16 @@ def print_success_report(
 
 def compute_tag_flags(
     semver_tags: dict[str, TagInfo],
-    current_version: version.Version | None,
+    current_version: semver.Version | None,
 ) -> tuple[bool, bool]:
     """
     Determine whether the triggering tag is prerelease and latest stable.
 
-    Latest is determined by the highest stable semantic version in the
-    repository, ignoring all prerelease tags.
+    Latest is determined by the highest stable release (no prerelease, no build
+    metadata) in the repository.
     """
     is_prerelease = bool(
-        current_version is not None and current_version.is_prerelease
+        current_version is not None and current_version.prerelease
     )
 
     if current_version is None:
@@ -607,9 +632,7 @@ def compute_tag_flags(
         )
         return is_prerelease, False
 
-    stable_tags = [
-        tag for tag in semver_tags.values() if not tag.version.is_prerelease
-    ]
+    stable_tags = list(release_tags(semver_tags).values())
     if not stable_tags:
         logger.warning(
             "⚠️  No stable semver tags found; marking is_latest=false for tag '%s'.",
@@ -667,32 +690,20 @@ def main() -> None:
         )
         sys.exit(1)
 
-    current_version: version.Version | None = None
+    current_version: semver.Version | None = None
     try:
         current_version = parse_tag_version(ref_name)
-    except version.InvalidVersion as exc:
-        # On deletion events, the deleted ref may not be relevant for integrity checks;
-        # we still validate the repository tags and report order.
-        if deleted_event:
-            logger.warning(
-                "⚠️  Deleted tag ref '%s' is not a valid semantic version: %s",
-                ref_name,
-                str(exc),
-            )
-        else:
-            logger.error(
-                "🚫 Tag '%s' is not a valid semantic version: %s", ref_name, str(exc)
-            )
-            append_summary(
-                [
-                    SUMMARY_HEADER,
-                    "🚫 Failed: Tag is not a valid semantic version",
-                    f"- Ref: tag `{ref_name}`",
-                    f"- Error: {exc}",
-                    "",
-                ]
-            )
-            sys.exit(1)
+    except ValueError as exc:
+        # A non-SemVer trigger tag (e.g. `nightly`, `latest`, or a malformed
+        # version) is not customer-facing: we do not fail on it. We still validate
+        # the repository's stable-release ordering (repo-integrity fallback) so a
+        # real out-of-order release elsewhere is caught.
+        logger.warning(
+            "⚠️  Trigger tag '%s' is not a valid semantic version: %s — ignoring it "
+            "for ordering; will verify stable-release integrity.",
+            ref_name,
+            str(exc),
+        )
 
     logger.info(
         "🔍 Starting semver order validation for tag '%s' (version '%s')...",
@@ -773,13 +784,13 @@ def main() -> None:
         append_summary(
             [
                 SUMMARY_HEADER,
-                "🚫 Failed: No valid semver tags found",
-                f"- Ref: tag `{ref_name}` (version `{current_version}`)",
-                "- Unable to validate ordering because no semver tags were detected.",
+                "ℹ️ Info: No valid semver tags found",
+                f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+                "- No semver tags were available to order.",
                 "",
             ]
         )
-        sys.exit(1)
+        sys.exit(0)
 
     # --- Deletion events: skip graph validation ---
     # Removing a tag cannot introduce a DAG ordering violation;
@@ -818,37 +829,59 @@ def main() -> None:
         )
         sys.exit(0)
 
-    # --- Graph-based validation ---
-    commit_sha = get_tag_commit_sha(ref_name)
-    logger.info("📍 Tag '%s' points to commit %s", ref_name, commit_sha[:12])
-
-    ancestor_names = get_ancestor_tag_names(commit_sha) - {ref_name}
-    descendant_names = get_descendant_tag_names(commit_sha) - {ref_name}
-
-    ancestor_semver_count = len(
-        [n for n in ancestor_names if n in semver_tags]
-    )
-    descendant_semver_count = len(
-        [n for n in descendant_names if n in semver_tags]
-    )
-    logger.info(
-        "📊 Validating against %d ancestor semver tags and %d descendant semver tags",
-        ancestor_semver_count,
-        descendant_semver_count,
+    # --- Ordering validation (stable releases only) ---
+    # Prerelease and build-metadata tags are not customer-facing; they are excluded
+    # from ordering. A stable-release trigger gets the focused per-tag check; any
+    # other trigger (prerelease/build/non-SemVer) falls back to a repo-wide
+    # stable-integrity scan so out-of-order stable releases are still caught.
+    rel_tags = release_tags(semver_tags)
+    is_release_trigger = (
+        current_version is not None
+        and not current_version.prerelease
+        and not current_version.build
     )
 
-    current_tag = semver_tags[ref_name]
-    violations = verify_graph_order(
-        current_tag, semver_tags, ancestor_names, descendant_names
-    )
+    if is_release_trigger:
+        commit_sha = get_tag_commit_sha(ref_name)
+        logger.info("📍 Tag '%s' points to commit %s", ref_name, commit_sha[:12])
+
+        ancestor_names = get_ancestor_tag_names(commit_sha) - {ref_name}
+        descendant_names = get_descendant_tag_names(commit_sha) - {ref_name}
+
+        ancestor_count = len([n for n in ancestor_names if n in rel_tags])
+        descendant_count = len([n for n in descendant_names if n in rel_tags])
+        logger.info(
+            "📊 Validating against %d ancestor release tags and %d descendant release tags",
+            ancestor_count,
+            descendant_count,
+        )
+
+        current_tag = semver_tags[ref_name]
+        violations = verify_graph_order(
+            current_tag, rel_tags, ancestor_names, descendant_names
+        )
+    else:
+        logger.info(
+            "📊 Trigger tag is not a stable release; verifying repository "
+            "stable-release integrity across %d release tags.",
+            len(rel_tags),
+        )
+        violations = verify_repo_integrity(rel_tags)
 
     if violations:
-        print_violation_report(violations, current_tag)
+        anchor = semver_tags.get(ref_name)
+        if anchor is not None:
+            print_violation_report(violations, anchor)
+        else:
+            logger.error("")
+            logger.error("🚫 SEMVER ORDER VIOLATION DETECTED (repository integrity)")
+            for v in violations:
+                logger.error("  • %s", v)
         summary_lines = [
             SUMMARY_HEADER,
             "🚫 Failed: SemVer ordering violation",
-            f"- Ref: tag `{ref_name}` (version `{current_version}`)",
-            "- Mode: git-graph ancestry (commit DAG)",
+            f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+            "- Mode: git-graph ancestry (stable releases only)",
             f"- Violations detected: {len(violations)}",
             "- Violations:",
         ]
@@ -858,22 +891,33 @@ def main() -> None:
         append_summary(summary_lines)
         sys.exit(1)
 
-    print_success_report(
-        current_tag, semver_tags, ancestor_semver_count, descendant_semver_count
-    )
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("✅ SEMVER ORDER VALIDATION PASSED")
+    logger.info("=" * 70)
+    if is_release_trigger:
+        logger.info("  Tag: %s (version %s)", ref_name, current_version)
+    else:
+        logger.info(
+            "  Trigger tag '%s' ignored for ordering (not a stable release).",
+            ref_name,
+        )
+    logger.info("  Release tags in repo: %d", len(rel_tags))
+    logger.info("=" * 70)
 
-    is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
-    step_outputs = derive_version_outputs(ref_name, current_version)
-    step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
-    step_outputs["is_latest"] = "true" if is_latest else "false"
-    append_github_outputs(step_outputs)
+    if current_version is not None:
+        is_prerelease, is_latest = compute_tag_flags(semver_tags, current_version)
+        step_outputs = derive_version_outputs(ref_name, current_version)
+        step_outputs["is_prerelease"] = "true" if is_prerelease else "false"
+        step_outputs["is_latest"] = "true" if is_latest else "false"
+        append_github_outputs(step_outputs)
     append_summary(
         [
             SUMMARY_HEADER,
             "✅ Passed: SemVer ordering verified",
-            f"- Ref: tag `{ref_name}` (version `{current_version}`)",
-            "- Mode: git-graph ancestry (commit DAG)",
-            f"- Tags validated: {len(semver_tags)} total, {ancestor_semver_count} ancestors, {descendant_semver_count} descendants",
+            f"- Ref: tag `{ref_name}` (version `{current_version if current_version is not None else 'unknown'}`)",
+            "- Mode: git-graph ancestry (stable releases only)",
+            f"- Release tags: {len(rel_tags)}",
             "",
         ]
     )
