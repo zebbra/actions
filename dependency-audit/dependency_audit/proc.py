@@ -29,7 +29,10 @@ def log(message: str) -> None:
 
 def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     log(f"$ {shlex.join(cmd)}")
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    except OSError as e:
+        raise ToolError(f"cannot run {cmd[0]}: {e}") from None
 
 
 def tail(text: str, lines: int = 5) -> str:

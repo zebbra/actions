@@ -391,6 +391,8 @@ def main(argv: list[str] | None = None) -> int:
         message = f"config error: {e}"
     except (ToolError, GuardError) as e:
         message = f"tool error, not a finding: {e}"
+    except Exception as e:
+        message = f"tool error, not a finding: {type(e).__name__}: {e}"
     print(f"::error::dependency-audit {message}".replace("\n", "%0A"))
     out.summary(f"## Dependency audit: {message.splitlines()[0]}\n\n```\n{message}\n```\n")
     return EXIT_ERROR

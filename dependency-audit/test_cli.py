@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dependency_audit import cli
+from dependency_audit import cli, proc
 from dependency_audit.model import Finding, ToolError, normalize
 
 CONFIG = """
@@ -221,6 +221,30 @@ def test_tool_error_exits_2_and_is_not_a_finding(repo, capsys):
     assert "tool error, not a finding" in summary
 
 
+def missing_binary(target, root, scope, work):
+    proc.run(["dependency-audit-test-no-such-binary"])
+
+
+def broken_report(target, root, scope, work):
+    raise KeyError("source")
+
+
+@pytest.mark.parametrize(
+    "audit, message",
+    [
+        (missing_binary, "tool error, not a finding: cannot run dependency-audit-test-no-such-binary"),
+        (broken_report, "tool error, not a finding: KeyError: 'source'"),
+    ],
+    ids=["missing-binary", "unexpected-exception"],
+)
+def test_unexpected_failure_exits_2_and_is_not_a_finding(repo, capsys, monkeypatch, audit, message):
+    monkeypatch.setattr(cli.BACKENDS["uv"], "audit", audit)
+    code, report, summary = run("full", tmp=repo)
+    assert code == 2 and report is None
+    assert message in capsys.readouterr().out
+    assert message in summary
+
+
 @pytest.mark.parametrize(
     "extra, message",
     [('[[ignore]]\nid = "X"\n', "`reason` is required"), ('unknown = "x"\n', "unknown key(s): unknown")],
@@ -307,3 +331,4 @@ def test_fix_commit_requires_clean_tree(repo, capsys):
     (repo / "README.md").write_text("dirty\n")
     assert cli.main(["fix", "--commit"]) == 2
     assert "clean working tree" in capsys.readouterr().out
+
