@@ -60,18 +60,20 @@ on:
 permissions: { contents: read }
 jobs:
   gate:
+    name: gate
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    concurrency: { group: dep-audit-gate-${{ github.ref }}, cancel-in-progress: "${{ github.event_name == 'pull_request' }}" }
+    concurrency: { group: "dep-audit-gate-${{ github.ref }}", cancel-in-progress: "${{ github.event_name == 'pull_request' }}" }
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 2 }
       - uses: zebbra/actions/dependency-audit@dependency-audit/latest
   fix:
+    name: fix
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    concurrency: { group: dep-audit-fix-${{ github.repository }}, cancel-in-progress: false }
-    permissions: { contents: read, issues: write }
+    concurrency: { group: "dep-audit-fix-${{ github.repository }}", cancel-in-progress: false }
+    permissions: { contents: read, issues: write }   # writes go through the App token
     steps:
       - uses: actions/checkout@v5
         with: { ref: "${{ github.event.repository.default_branch }}" }
