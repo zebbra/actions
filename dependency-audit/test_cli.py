@@ -354,4 +354,6 @@ def test_fix_commit_restores_lockfile_after_tool_error(repo, tmp_path, monkeypat
     issue = tmp_path.parent / "issue.md"
     assert cli.main(["fix", "--commit", "--issue-body-out", str(issue)]) == 0
     assert "uv lock failed" in issue.read_text()
+    blocked = issue.read_text().split("### Blocked")[1].split("###")[0]
+    assert "`urllib3`" in blocked and "fix failed: tool error (see Tool errors)" in blocked
     assert git(repo, "status", "--porcelain") == ""

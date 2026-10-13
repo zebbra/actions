@@ -100,6 +100,17 @@ def installed(target: Target, root: Path) -> dict[str, list[str]]:
     return {name: sorted(v) for name, v in versions.items()}
 
 
+def npm_error(stderr: str, returncode: int) -> str:
+    """The first two `npm error` lines without the debug-log pointer, else the last stderr line or the exit code."""
+    lines = [
+        line.removeprefix("npm error").removeprefix("npm ERR!").strip()
+        for line in stderr.splitlines()
+        if line.startswith(("npm error", "npm ERR!"))
+    ]
+    lines = [line for line in lines if line and not line.startswith(("A complete log", "Log files were not written"))]
+    return "; ".join(lines[:2]) or tail(stderr, 1) or f"exit {returncode}"
+
+
 def fix(target: Target, root: Path, findings: list[Finding], commit: bool) -> dict[str, str]:
     """`npm audit fix` within semver ranges, per-package `npm update` on failure; return package -> blocker."""
     fixable = sorted({f.package for f in findings if f.fix_versions})
@@ -115,9 +126,8 @@ def fix(target: Target, root: Path, findings: list[Finding], commit: bool) -> di
         """Run cmd; restore lockfile and manifest and return the error when it fails or edits the manifest."""
         before = (lockfile.read_bytes(), manifest.read_bytes())
         p = run(cmd)
-        output = p.stdout + p.stderr
-        if p.returncode != 0 and ("ERESOLVE" in output or lockfile.read_bytes() == before[0]):
-            error = "ERESOLVE" if "ERESOLVE" in output else tail(p.stderr, 1) or f"exit {p.returncode}"
+        if p.returncode != 0:
+            error = npm_error(p.stderr, p.returncode)
         elif manifest.read_bytes() != before[1]:
             error = f"{target.manifest} would change"
         else:

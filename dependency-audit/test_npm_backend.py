@@ -128,6 +128,38 @@ def test_fix_reverts_manifest_edits(monkeypatch, project):
     assert reasons["lodash"] == "npm update failed: package.json would change"
 
 
+CRASH = (
+    "npm error Cannot read properties of null (reading 'edgesOut')\n"
+    "npm error A complete log of this run can be found in: /home/runner/.npm/_logs/debug-0.log\n"
+)
+
+
+def test_fix_reverts_a_crash_that_wrote_the_lockfile_and_reports_the_error(monkeypatch, project):
+    def fake(cmd, cwd=None):
+        (project / "package-lock.json").write_text("{}")  # partial write before the crash
+        if cmd[1] == "update" and cmd[2] == "lodash":
+            return completed(0)
+        return completed(1, "", CRASH)
+
+    monkeypatch.setattr(npm_backend, "run", fake)
+    findings = npm_backend.parse_npm_audit(report(), lock(), "web")
+    reasons = npm_backend.fix(TARGET, project, findings, commit=False)
+    assert reasons["@nestjs/common"] == "needs @nestjs/common@11.1.6 (semver major)"
+    assert reasons["lodash"] == "no version inside the manifest ranges fixes it"
+    assert (project / "package-lock.json").read_text() == "{}"  # the successful update is kept
+
+
+def test_fix_crash_without_a_successful_update_restores_the_lockfile(monkeypatch, project):
+    def fake(cmd, cwd=None):
+        (project / "package-lock.json").write_text("{}")
+        return completed(1, "", CRASH)
+
+    monkeypatch.setattr(npm_backend, "run", fake)
+    reasons = npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert json.loads((project / "package-lock.json").read_text()) == lock()
+    assert reasons["lodash"] == "npm update failed: Cannot read properties of null (reading 'edgesOut')"
+
+
 def test_installed_reads_every_instance(project):
     assert npm_backend.installed(TARGET, project)["lodash"] == ["4.17.21", "4.17.4"]
 

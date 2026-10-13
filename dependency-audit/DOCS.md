@@ -113,8 +113,9 @@ Keep `mode: full` explicit there: `auto` maps `workflow_dispatch` to `fix`.
    (`uv lock --upgrade-package pkg==version`), falls back once to the newest allowed version, and otherwise records
    the package as blocked with uv's explanation of the conflict (or its dependents from `uv tree --invert`).
    One commit per package: `fix(deps): bump <pkg> <from> -> <to> (<ids>)`.
-3. npm: `npm audit fix --package-lock-only --ignore-scripts` (no `--force`, so it stays within semver ranges); on
-   ERESOLVE or a `package.json` change it reverts and runs `npm update <pkg>` per package. One commit per target.
+3. npm: `npm audit fix --package-lock-only --ignore-scripts` (no `--force`, so it stays within semver ranges); when
+   it exits non-zero (ERESOLVE, an npm crash) or changes `package.json` it reverts and runs `npm update <pkg>` per
+   package, reverting each failed update the same way. One commit per target.
 4. Re-audits and sorts findings into fixed, blocked, no fix, ignored but now fixable, and unused ignores.
 5. Opens or force-updates one PR from `bot/dependency-audit` to the default branch, labelled `pr-security`;
    reviewers come from CODEOWNERS. The branch is rebuilt from the default branch on every run and deleted when it

@@ -257,9 +257,11 @@ def cmd_fix(args: argparse.Namespace, root: Path, out: Output) -> int:
             if t.name not in pre:
                 continue
             reasons = attempt(t, "fix", lambda: BACKENDS[t.ecosystem].fix(t, root, pre[t.name], args.commit))
-            if reasons is None and args.commit:
-                git(root, "checkout", "--", t.lockfile, check=False)
-            blockers[t.name] = reasons or {}
+            if reasons is None:
+                if args.commit:
+                    git(root, "checkout", "--", t.lockfile, check=False)
+                reasons = {f.package: "fix failed: tool error (see Tool errors)" for f in pre[t.name]}
+            blockers[t.name] = reasons
             found = attempt(t, "re-audit", lambda: audit(t, root, "all", work / "post" / t.name))
             if found is not None:
                 post[t.name] = found
