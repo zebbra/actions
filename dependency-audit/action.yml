@@ -7,7 +7,8 @@ inputs:
     description: |
       `auto` resolves from the event: `pull_request` -> `diff` against `HEAD^1` (checkout with `fetch-depth: 2`);
       `push` -> `diff` against `github.event.before` (`full` when it is all zeros); `schedule` and
-      `workflow_dispatch` -> `fix`; any other event -> `full`. Explicit values: `check`, `diff`, `full`, `fix`.
+      `workflow_dispatch` -> `fix`; any other event -> `full` (also `pull_request_target`, whose default checkout is
+      the base branch, not the PR). Explicit values: `check`, `diff`, `full`, `fix`.
     required: false
     default: auto
   config:
@@ -56,7 +57,7 @@ runs:
         base=""
         if [ "$mode" = auto ]; then
           case "$EVENT_NAME" in
-            pull_request|pull_request_target|push) mode="diff" ;;
+            pull_request|push) mode="diff" ;;
             schedule|workflow_dispatch) mode="fix" ;;
             *) mode="full" ;;
           esac
@@ -65,7 +66,7 @@ runs:
           check|full|fix) ;;
           diff)
             case "$EVENT_NAME" in
-              pull_request|pull_request_target)
+              pull_request)
                 if ! base=$(git rev-parse --verify --quiet 'HEAD^1'); then
                   git fetch --quiet --no-tags --depth=2 origin "$GITHUB_REF"
                   base=$(git rev-parse --verify 'FETCH_HEAD^1')
