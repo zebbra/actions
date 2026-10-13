@@ -115,8 +115,9 @@ Keep `mode: full` explicit there: `auto` maps `workflow_dispatch` to `fix`.
    A `uv lock` failure that is not a resolution conflict (network, index) is a tool error for the target.
    One commit per package: `fix(deps): bump <pkg> <from> -> <to> (<ids>)`.
 3. npm: `npm audit fix --package-lock-only --ignore-scripts` (no `--force`, so it stays within semver ranges); when
-   it exits non-zero (ERESOLVE, an npm crash) or changes `package.json` it reverts and runs `npm update <pkg>` per
-   package, reverting each failed update the same way. One commit per target.
+   it prints `npm error` lines (ERESOLVE, an npm crash), exits non-zero without changing the lockfile, or changes
+   `package.json`, it reverts and runs `npm update <pkg>` per package, reverting each failed update the same way. A
+   partial fix (exit 1 because findings remain, no `npm error` lines) is kept. One commit per target.
 4. Re-audits and sorts findings into fixed, blocked, no fix, ignored but now fixable, and unused ignores.
 5. Opens or force-updates one PR from `bot/dependency-audit` to the default branch, labelled `pr-security`;
    reviewers come from CODEOWNERS. The branch is rebuilt from the default branch on every run and deleted when it
