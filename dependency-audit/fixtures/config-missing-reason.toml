@@ -1,0 +1,7 @@
+[[target]]
+name = "backend"
+ecosystem = "uv"
+path = "backend"
+
+[[ignore]]
+id = "PYSEC-2026-1325"

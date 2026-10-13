@@ -1,0 +1,32 @@
+[[target]]
+name = "backend"
+ecosystem = "uv"
+path = "backend"
+scope = "all"
+
+[[target]]
+name = "sdk"
+ecosystem = "uv"
+path = "."
+groups = ["fb"]
+fail-on = "none"
+
+[[target]]
+name = "client"
+ecosystem = "npm"
+path = "client"
+fail-on = "none"
+
+[[exclude]]
+glob = "examples/**"
+reason = "Example projects are not shipped."
+
+[[ignore]]
+id = "GHSA-3qf3-8w2g-rqmx"
+package = "python-jose"
+reason = "Not reachable: only the realm JWKS dict is passed as key."
+issue = "zebbra/neops-core#2239"
+
+[[ignore]]
+id = "PYSEC-2026-1325"
+reason = "No fixed release of ecdsa."
