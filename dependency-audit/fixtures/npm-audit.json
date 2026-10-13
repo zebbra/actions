@@ -1,0 +1,78 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "lodash": {
+      "name": "lodash",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1106913,
+          "name": "lodash",
+          "dependency": "lodash",
+          "title": "Prototype pollution in lodash, reported by @someone, see #12",
+          "url": "https://github.com/advisories/GHSA-xxjr-mmjv-4gpg",
+          "severity": "moderate",
+          "range": ">=4.0.0 <=4.17.22"
+        }
+      ],
+      "effects": ["legacy-util"],
+      "range": "4.0.0 - 4.17.22",
+      "nodes": ["node_modules/lodash", "node_modules/legacy-util/node_modules/lodash"],
+      "fixAvailable": true
+    },
+    "legacy-util": {
+      "name": "legacy-util",
+      "severity": "high",
+      "isDirect": true,
+      "via": ["lodash"],
+      "effects": [],
+      "range": "*",
+      "nodes": ["node_modules/legacy-util"],
+      "fixAvailable": true
+    },
+    "@nestjs/common": {
+      "name": "@nestjs/common",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1103412,
+          "name": "@nestjs/common",
+          "dependency": "@nestjs/common",
+          "title": "nest allows a remote attacker to execute arbitrary code",
+          "url": "https://github.com/advisories/GHSA-cj7v-w2c7-cp7c",
+          "severity": "moderate",
+          "range": "<10.4.16"
+        }
+      ],
+      "effects": [],
+      "range": "<10.4.16",
+      "nodes": ["node_modules/@nestjs/common"],
+      "fixAvailable": {"name": "@nestjs/common", "version": "11.1.6", "isSemVerMajor": true}
+    },
+    "ip": {
+      "name": "ip",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1101851,
+          "name": "ip",
+          "dependency": "ip",
+          "title": "ip SSRF improper categorization in isPublic",
+          "url": "https://github.com/advisories/GHSA-2p57-rm9w-gvfp",
+          "severity": "high",
+          "range": "<=2.0.1"
+        }
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": ["node_modules/ip"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {"info": 0, "low": 0, "moderate": 2, "high": 2, "critical": 0, "total": 4}
+  }
+}
