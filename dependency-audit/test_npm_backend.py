@@ -149,6 +149,26 @@ def test_fix_reverts_a_crash_that_wrote_the_lockfile_and_reports_the_error(monke
     assert (project / "package-lock.json").read_text() == "{}"  # the successful update is kept
 
 
+def test_partial_audit_fix_exits_1_and_keeps_its_lockfile(monkeypatch, project):
+    calls = []
+
+    def fake(cmd, cwd=None):
+        calls.append(cmd[1])
+        (project / "package-lock.json").write_text("{}")
+        return completed(1, "", "")  # npm audit fix: some vulnerabilities remain, no `npm error` lines
+
+    monkeypatch.setattr(npm_backend, "run", fake)
+    npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert calls == ["audit"]
+    assert (project / "package-lock.json").read_text() == "{}"
+
+
+def test_non_zero_exit_without_a_lockfile_change_is_a_failure(monkeypatch, project):
+    monkeypatch.setattr(npm_backend, "run", lambda cmd, cwd=None: completed(1, "", ""))
+    reasons = npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert reasons["lodash"] == "npm update failed: exit 1"
+
+
 def test_fix_crash_without_a_successful_update_restores_the_lockfile(monkeypatch, project):
     def fake(cmd, cwd=None):
         (project / "package-lock.json").write_text("{}")

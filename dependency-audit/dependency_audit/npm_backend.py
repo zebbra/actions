@@ -146,10 +146,15 @@ def fix(target: Target, root: Path, findings: list[Finding], commit: bool) -> di
     common = ["--prefix", str(root / target.path), "--package-lock-only", "--ignore-scripts"]
 
     def attempt(cmd: list[str]) -> str | None:
-        """Run cmd; restore lockfile and manifest and return the error when it fails or edits the manifest."""
+        """Run cmd; restore lockfile and manifest and return the error when it fails or edits the manifest.
+
+        `npm audit fix` also exits 1 when vulnerabilities remain after a partial fix, without `npm error` lines: that
+        counts as a failure only when the lockfile is unchanged.
+        """
         before = (lockfile.read_bytes(), manifest.read_bytes())
         p = run(cmd)
-        if p.returncode != 0:
+        npm_failed = any(line.startswith(("npm error", "npm ERR!")) for line in p.stderr.splitlines())
+        if p.returncode != 0 and (npm_failed or lockfile.read_bytes() == before[0]):
             error = npm_error(p.stderr, p.returncode)
         elif manifest.read_bytes() != before[1]:
             error = f"{target.manifest} would change"
