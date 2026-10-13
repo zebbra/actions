@@ -160,6 +160,68 @@ def test_fix_crash_without_a_successful_update_restores_the_lockfile(monkeypatch
     assert reasons["lodash"] == "npm update failed: Cannot read properties of null (reading 'edgesOut')"
 
 
+ZEBBRA_404 = (
+    "npm error code E404\n"
+    "npm error 404 Not Found - GET https://registry.npmjs.org/@zebbra%2fneops-nest-graphql-client - Not found\n"
+    "npm error A complete log of this run can be found in: /home/runner/.npm/_logs/debug-0.log\n"
+)
+
+
+@pytest.mark.parametrize("command", ["audit", "update"])
+def test_registry_error_restores_the_lockfile_and_is_a_tool_error(monkeypatch, project, command):
+    monkeypatch.delenv("NPM_TOKEN", raising=False)
+
+    def fake(cmd, cwd=None):
+        (project / "package-lock.json").write_text("{}")
+        if cmd[1] == command:
+            return completed(1, "", ZEBBRA_404)
+        return completed(1, "", "npm error code ERESOLVE\n")
+
+    monkeypatch.setattr(npm_backend, "run", fake)
+    with pytest.raises(ToolError, match="could not reach the registry: code E404; 404 Not Found") as e:
+        npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert "set the `npm-token` input" in str(e.value)
+    assert json.loads((project / "package-lock.json").read_text()) == lock()
+
+
+@pytest.fixture
+def runner_temp(monkeypatch, tmp_path_factory):
+    path = tmp_path_factory.mktemp("runner-temp")
+    monkeypatch.setenv("RUNNER_TEMP", str(path))
+    return path
+
+
+@pytest.fixture
+def npm_calls(monkeypatch, project, runner_temp):
+    """Records each npm command with the userconfig it points to, read while the command runs."""
+    calls = []
+
+    def fake(cmd, cwd=None):
+        config = Path(cmd[cmd.index("--userconfig") + 1]) if "--userconfig" in cmd else None
+        calls.append((cmd, config, config.read_text() if config else None))
+        return completed(1, "", "npm error code ERESOLVE\n")
+
+    monkeypatch.setattr(npm_backend, "run", fake)
+    return calls
+
+
+def test_npm_token_maps_the_zebbra_scope_in_a_temporary_userconfig(monkeypatch, project, npm_calls, runner_temp):
+    monkeypatch.setenv("NPM_TOKEN", "token-value")
+    npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert [cmd[1] for cmd, _, _ in npm_calls] == ["audit", "update", "update"]
+    for cmd, config, content in npm_calls:
+        assert config.parent.parent == runner_temp and not config.exists()
+        assert content == "@zebbra:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NPM_TOKEN}\n"
+    assert "--registry=https://registry.npmjs.org/" in npm_calls[0][0]
+    assert sorted(p.name for p in project.iterdir()) == ["package-lock.json", "package.json"]
+
+
+def test_without_npm_token_npm_keeps_its_own_userconfig(monkeypatch, project, npm_calls):
+    monkeypatch.delenv("NPM_TOKEN", raising=False)
+    npm_backend.fix(TARGET, project, npm_backend.parse_npm_audit(report(), lock(), "web"), commit=False)
+    assert npm_calls and all(config is None for _, config, _ in npm_calls)
+
+
 def test_installed_reads_every_instance(project):
     assert npm_backend.installed(TARGET, project)["lodash"] == ["4.17.21", "4.17.4"]
 

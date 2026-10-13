@@ -155,7 +155,10 @@ report. `diff --base <rev>` reproduces the PR gate. `--json-out`, `--summary-out
 - Repositories created from a template inherit the config, the caller and the CODEOWNERS lines; their bot runs dry
   until the App is installed there.
 - `npm audit` always queries `registry.npmjs.org`, because GitHub Packages has no audit endpoint. `npm-token` is
-  only needed when `npm audit fix` or `npm update` resolves `@zebbra/*` packages.
+  only needed when `npm audit fix` or `npm update` resolves `@zebbra/*` packages. When `NPM_TOKEN` is set, the CLI
+  passes those commands a temporary npm userconfig (`@zebbra:registry=https://npm.pkg.github.com` plus an auth line
+  that reads `${NPM_TOKEN}` from the environment) in place of `~/.npmrc`, so no `.npmrc` or `setup-node` is needed.
+  A registry or auth error (no token, a rejected token) is a tool error in the triage issue.
 - Most npm fixes need a semver-major bump. They show up as blocked with the version npm proposes.
 - Supported lockfiles: `uv.lock` and `package-lock.json`. yarn v1, poetry and Pipfile lockfiles are not audited.
 - Tool pins (`pip-audit`, the npm registry) live in `dependency_audit/__init__.py`; the uv version is pinned in

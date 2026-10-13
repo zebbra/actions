@@ -5,3 +5,4 @@ __version__ = "0.1.0"
 # Tool pins: the only place external audit tools are versioned.
 PIP_AUDIT = "pip-audit==2.10.1"
 NPM_REGISTRY = "https://registry.npmjs.org/"
+GITHUB_PACKAGES = "https://npm.pkg.github.com"  # `@zebbra/*` packages in fix mode, with NPM_TOKEN

@@ -25,7 +25,10 @@ inputs:
     required: false
     default: ''
   npm-token:
-    description: Token for `@zebbra/*` packages on GitHub Packages in `fix` mode, exported as `NPM_TOKEN` and `NODE_AUTH_TOKEN`.
+    description: |
+      Token for `@zebbra/*` packages on GitHub Packages in `fix` mode, exported as `NPM_TOKEN` and `NODE_AUTH_TOKEN`.
+      When set, `npm audit fix` and `npm update` get a temporary npm userconfig in `$RUNNER_TEMP` that maps `@zebbra`
+      to `https://npm.pkg.github.com`; the repository needs no `.npmrc`.
     required: false
     default: ''
 
