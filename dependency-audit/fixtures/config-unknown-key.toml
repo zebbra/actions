@@ -1,0 +1,5 @@
+[[target]]
+name = "backend"
+ecosystem = "uv"
+path = "backend"
+failon = "any"

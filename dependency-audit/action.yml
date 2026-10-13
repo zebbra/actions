@@ -1,0 +1,229 @@
+name: "Dependency audit"
+description: "Audits uv and npm lockfiles for known vulnerabilities: gates PRs on new findings, gates releases on all findings, and refreshes lockfiles in a nightly bot PR."
+author: "Zebbra AG"
+
+inputs:
+  mode:
+    description: |
+      `auto` resolves from the event: `pull_request` -> `diff` against `HEAD^1` (checkout with `fetch-depth: 2`);
+      `push` -> `diff` against `github.event.before` (`full` when it is all zeros); `schedule` and
+      `workflow_dispatch` -> `fix`; any other event -> `full` (also `pull_request_target`, whose default checkout is
+      the base branch, not the PR). Explicit values: `check`, `diff`, `full`, `fix`.
+    required: false
+    default: auto
+  config:
+    description: Config file, relative to the repository root. When it is absent the action prints a notice and succeeds.
+    required: false
+    default: .github/dependency-audit.toml
+  app-id:
+    description: |
+      GitHub App id for the bot PR in `fix` mode. Without `app-id` and `app-private-key`, `fix` runs with
+      `--dry-run`: no commit, no PR, the triage issue lists the fixable findings.
+    required: false
+    default: ''
+  app-private-key:
+    description: Private key of the GitHub App named by `app-id`.
+    required: false
+    default: ''
+  npm-token:
+    description: |
+      Token for `@zebbra/*` packages on GitHub Packages in `fix` mode, exported as `NPM_TOKEN` and `NODE_AUTH_TOKEN`.
+      When set, `npm audit fix` and `npm update` get a temporary npm userconfig in `$RUNNER_TEMP` that maps `@zebbra`
+      to `https://npm.pkg.github.com`; the repository needs no `.npmrc`.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve mode
+      id: resolve
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        CONFIG: ${{ inputs.config }}
+        EVENT_NAME: ${{ github.event_name }}
+        BEFORE: ${{ github.event.before }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if [ ! -f "$CONFIG" ]; then
+          echo "::notice::dependency-audit: $CONFIG not found; nothing to audit"
+          echo "mode=skip" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        mode="$INPUT_MODE"
+        base=""
+        if [ "$mode" = auto ]; then
+          case "$EVENT_NAME" in
+            pull_request|push) mode="diff" ;;
+            schedule|workflow_dispatch) mode="fix" ;;
+            *) mode="full" ;;
+          esac
+        fi
+        case "$mode" in
+          check|full|fix) ;;
+          diff)
+            case "$EVENT_NAME" in
+              pull_request)
+                if ! base=$(git rev-parse --verify --quiet 'HEAD^1'); then
+                  git fetch --quiet --no-tags --depth=2 origin "$GITHUB_REF"
+                  base=$(git rev-parse --verify 'FETCH_HEAD^1')
+                fi
+                ;;
+              push)
+                if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then mode="full"; else base="$BEFORE"; fi
+                ;;
+              *)
+                echo "::error::dependency-audit: diff mode needs a pull_request or push event (got $EVENT_NAME)"
+                exit 2
+                ;;
+            esac
+            ;;
+          *)
+            echo "::error::dependency-audit: unknown mode '$mode' (auto, check, diff, full, fix)"
+            exit 2
+            ;;
+        esac
+        if [ "$mode" = fix ]; then
+          default="${DEFAULT_BRANCH:-$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)}"
+          branch=$(git symbolic-ref --quiet --short HEAD || true)
+          if [ "$branch" != "$default" ]; then
+            echo "::error::dependency-audit: fix mode needs a checkout of the default branch '$default' (got '${branch:-detached HEAD}')"
+            exit 2
+          fi
+          echo "default-branch=$default" >> "$GITHUB_OUTPUT"
+        fi
+        echo "Resolved mode: $mode${base:+ (base $base)}"
+        {
+          echo "mode=$mode"
+          echo "base=$base"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Set up uv
+      if: steps.resolve.outputs.mode != 'skip'
+      uses: astral-sh/setup-uv@v10.2.0
+      with:
+        version: "0.12.19"
+        enable-cache: false
+
+    - name: Fetch diff base
+      if: steps.resolve.outputs.mode == 'diff'
+      shell: bash
+      env:
+        BASE: ${{ steps.resolve.outputs.base }}
+      run: |
+        set -euo pipefail
+        git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch --quiet --no-tags --depth=1 origin "$BASE"
+
+    - name: Mint bot token
+      id: app-token
+      if: steps.resolve.outputs.mode == 'fix' && inputs.app-id != '' && inputs.app-private-key != ''
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+
+    - name: Audit
+      id: audit
+      if: steps.resolve.outputs.mode != 'skip'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        CONFIG: ${{ inputs.config }}
+        MODE: ${{ steps.resolve.outputs.mode }}
+        BASE: ${{ steps.resolve.outputs.base }}
+        HAS_APP: ${{ steps.app-token.outputs.token != '' }}
+        NPM_TOKEN: ${{ inputs.npm-token }}
+        NODE_AUTH_TOKEN: ${{ inputs.npm-token }}
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/dependency-audit"
+        mkdir -p "$out"
+        args=(--config "$CONFIG" --summary-out "$GITHUB_STEP_SUMMARY" --json-out "$out/report.json")
+        case "$MODE" in
+          diff) args+=(diff --base "$BASE") ;;
+          fix)
+            args+=(fix --pr-body-out "$out/pr-body.md" --issue-body-out "$out/issue-body.md")
+            if [ "$HAS_APP" = true ]; then args+=(--commit); else args+=(--dry-run); fi
+            ;;
+          *) args+=("$MODE") ;;
+        esac
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+        uvx --from "$ACTION_PATH" dependency-audit "${args[@]}"
+
+    - name: Ensure labels
+      if: steps.resolve.outputs.mode == 'fix'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        GH_REPO: ${{ github.repository }}
+        HAS_APP: ${{ steps.app-token.outputs.token != '' }}
+      run: |
+        set -euo pipefail
+        # Same colour and description as assets/labels.tsv in zebbra/project-infrastructure; an existing label is kept.
+        ensure_label() {
+          local err
+          if ! err=$(gh label create "$1" --color "$2" --description "$3" 2>&1 >/dev/null); then
+            case "$err" in
+              *"already exists"*) ;;
+              *) echo "::error::dependency-audit: cannot create label $1: $err"; return 1 ;;
+            esac
+          fi
+        }
+        ensure_label dependency-audit 5319e7 "Rolling triage issue of the nightly dependency audit"
+        if [ "$HAS_APP" = true ]; then
+          ensure_label pr-security ffa500 "PR introduces a security improvement"
+        fi
+
+    - name: Update triage issue
+      id: issue
+      if: steps.resolve.outputs.mode == 'fix'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        GH_REPO: ${{ github.repository }}
+        BODY: ${{ steps.audit.outputs.dir }}/issue-body.md
+      run: |
+        set -euo pipefail
+        marker='<!-- dependency-audit:triage -->'
+        number=$(gh issue list --label dependency-audit --state open --limit 100 --json number,body \
+          --jq "[.[] | select(.body | contains(\"$marker\"))][0].number // empty")
+        if [ -s "$BODY" ]; then
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file "$BODY" >/dev/null
+          else
+            url=$(gh issue create --title "Dependency audit: findings the bot cannot fix" --label dependency-audit --body-file "$BODY")
+            number="${url##*/}"
+          fi
+          echo "Triage issue: #$number"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+        elif [ -n "$number" ]; then
+          gh issue close "$number" --comment "Nothing left to triage: the latest dependency audit run found no blocked or unfixable findings and no stale ignores."
+          echo "Closed triage issue #$number"
+        fi
+
+    - name: Prepare PR body
+      if: steps.app-token.outputs.token != ''
+      shell: bash
+      env:
+        BODY: ${{ steps.audit.outputs.dir }}/pr-body.md
+        ISSUE: ${{ steps.issue.outputs.number }}
+      run: |
+        set -euo pipefail
+        content=$(cat "$BODY")
+        reference="${ISSUE:+#$ISSUE}"
+        printf '%s\n' "${content//\{triage_issue\}/${reference:-the open dependency-audit issue}}" > "$BODY"
+
+    - name: Open or update bot PR
+      if: steps.app-token.outputs.token != ''
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ steps.app-token.outputs.token }}
+        branch: bot/dependency-audit
+        base: ${{ steps.resolve.outputs.default-branch }}
+        delete-branch: true
+        labels: pr-security
+        title: "fix(deps): refresh lockfiles for security advisories"
+        body-path: ${{ steps.audit.outputs.dir }}/pr-body.md
