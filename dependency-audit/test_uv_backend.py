@@ -134,7 +134,7 @@ class FakeLock:
 
     def __init__(self, lockfile, versions, outcomes):
         self.lockfile = lockfile
-        self.outcomes = outcomes  # spec -> (returncode, {package: version} written to the lockfile)
+        self.outcomes = outcomes  # spec -> (returncode, {package: version} written to the lockfile[, stderr])
         self.calls = []
         lockfile.write_text(render_lock(versions))
 
@@ -142,11 +142,11 @@ class FakeLock:
         self.calls.append(cmd)
         if cmd[:2] == ["uv", "lock"]:
             spec = cmd[cmd.index("--upgrade-package") + 1]
-            returncode, changes = self.outcomes[spec]
+            returncode, changes, *stderr = self.outcomes[spec]
             if changes:
                 versions = {p["name"]: p["version"] for p in tomllib.loads(self.lockfile.read_text())["package"]}
                 self.lockfile.write_text(render_lock(versions | changes))
-            return completed(returncode, "", "" if returncode == 0 else "No solution found")
+            return completed(returncode, "", "" if returncode == 0 else (stderr or ["No solution found"])[0])
         if cmd[:2] == ["uv", "tree"]:
             return completed(0, "django v4.2.30\n└── app v0.0.0 (group: prod)\n")
         raise AssertionError(cmd)
@@ -205,6 +205,22 @@ def test_fix_discards_a_pinned_attempt_that_falls_short(monkeypatch, tmp_path):
     django = [f for f in pyjwt_findings() if f.package == "django"]
     assert uv_backend.fix(target, tmp_path, django, commit=True) == {}
     assert changed_lines(tmp_path) == ['-version = "4.2.30"', '+version = "5.2.17"']
+
+
+def test_fix_network_error_restores_the_lockfile_and_is_a_tool_error(monkeypatch, tmp_path):
+    target = Target(name="backend", ecosystem="uv", path=".")
+    lock_repo(
+        tmp_path,
+        {"asgiref": "3.8.1", "django": "4.2.30", "pyjwt": "2.10.1"},
+        {
+            "django==5.2.17": (2, {"django": "5.2.17"}, "error: Failed to fetch: `https://pypi.org/simple/django/`"),
+        },
+        monkeypatch,
+    )
+    before = (tmp_path / "uv.lock").read_text()
+    with pytest.raises(ToolError, match="uv lock --upgrade-package django==5.2.17 failed: error: Failed to fetch"):
+        uv_backend.fix(target, tmp_path, pyjwt_findings(), commit=True)
+    assert (tmp_path / "uv.lock").read_text() == before
 
 
 DJANGO_CONFLICT = """Using CPython 3.12.7

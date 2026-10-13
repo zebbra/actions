@@ -112,6 +112,7 @@ Keep `mode: full` explicit there: `auto` maps `workflow_dispatch` to `fix`.
 2. uv: per package, upgrades to the highest of the lowest fixed versions of its advisories
    (`uv lock --upgrade-package pkg==version`), falls back once to the newest allowed version, and otherwise records
    the package as blocked with uv's explanation of the conflict (or its dependents from `uv tree --invert`).
+   A `uv lock` failure that is not a resolution conflict (network, index) is a tool error for the target.
    One commit per package: `fix(deps): bump <pkg> <from> -> <to> (<ids>)`.
 3. npm: `npm audit fix --package-lock-only --ignore-scripts` (no `--force`, so it stays within semver ranges); when
    it exits non-zero (ERESOLVE, an npm crash) or changes `package.json` it reverts and runs `npm update <pkg>` per

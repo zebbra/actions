@@ -95,9 +95,17 @@ def installed(target: Target, root: Path) -> dict[str, list[str]]:
 
 
 def _lock(target: Target, root: Path, package: str, wanted: str | None = None) -> tuple[bool, str]:
-    """`uv lock --upgrade-package` for `package` (pinned to `wanted` if given); return (success, blocker)."""
+    """`uv lock --upgrade-package` for `package` (pinned to `wanted` if given); return (success, blocker).
+
+    A failure without "No solution found" (network, index, uv itself) restores the lockfile and raises ToolError.
+    """
     spec = f"{package}=={wanted}" if wanted else package
+    lockfile = root / target.lockfile
+    before = lockfile.read_bytes()
     p = run(["uv", "lock", "--directory", str(root / target.path), "--upgrade-package", spec])
+    if p.returncode != 0 and "No solution found" not in p.stderr:
+        lockfile.write_bytes(before)
+        raise ToolError(f"uv lock --upgrade-package {spec} failed: {tail(p.stderr)}")
     return p.returncode == 0, conflict(p.stderr, package, wanted or "")
 
 
