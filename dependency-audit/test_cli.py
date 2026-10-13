@@ -255,6 +255,13 @@ def test_unexpected_failure_exits_2_and_is_not_a_finding(repo, capsys, monkeypat
     assert message in summary
 
 
+def test_unexpected_exception_logs_its_traceback(repo, capsys, monkeypatch):
+    monkeypatch.setattr(cli.BACKENDS["uv"], "audit", broken_report)
+    assert run("full", tmp=repo)[0] == 2
+    err = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in err and "KeyError: 'source'" in err
+
+
 @pytest.mark.parametrize(
     "extra, message",
     [('[[ignore]]\nid = "X"\n', "`reason` is required"), ('unknown = "x"\n', "unknown key(s): unknown")],
