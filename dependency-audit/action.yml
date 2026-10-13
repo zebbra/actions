@@ -152,6 +152,30 @@ runs:
         echo "dir=$out" >> "$GITHUB_OUTPUT"
         uvx --from "$ACTION_PATH" dependency-audit "${args[@]}"
 
+    - name: Ensure labels
+      if: steps.resolve.outputs.mode == 'fix'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        GH_REPO: ${{ github.repository }}
+        HAS_APP: ${{ steps.app-token.outputs.token != '' }}
+      run: |
+        set -euo pipefail
+        # Same colour and description as assets/labels.tsv in zebbra/project-infrastructure; an existing label is kept.
+        ensure_label() {
+          local err
+          if ! err=$(gh label create "$1" --color "$2" --description "$3" 2>&1 >/dev/null); then
+            case "$err" in
+              *"already exists"*) ;;
+              *) echo "::error::dependency-audit: cannot create label $1: $err"; return 1 ;;
+            esac
+          fi
+        }
+        ensure_label dependency-audit 5319e7 "Rolling triage issue of the nightly dependency audit"
+        if [ "$HAS_APP" = true ]; then
+          ensure_label pr-security ffa500 "PR introduces a security improvement"
+        fi
+
     - name: Update triage issue
       id: issue
       if: steps.resolve.outputs.mode == 'fix'

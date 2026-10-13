@@ -121,7 +121,8 @@ Keep `mode: full` explicit there: `auto` maps `workflow_dispatch` to `fix`.
    reviewers come from CODEOWNERS. The branch is rebuilt from the default branch on every run and deleted when it
    has no diff.
 6. Keeps one open issue labelled `dependency-audit` (found by its `<!-- dependency-audit:triage -->` marker) with
-   blocked and unfixable findings, stale ignores and tool errors; it is closed when empty.
+   blocked and unfixable findings, stale ignores and tool errors; it is closed when empty. The action creates the
+   `dependency-audit` and `pr-security` labels when they are missing (colours as in project-infrastructure).
 
 Bot commits touch lockfiles only; the CLI refuses to commit when anything else changed. Ignore entries,
 `pyproject.toml` and `package.json` are never edited.
