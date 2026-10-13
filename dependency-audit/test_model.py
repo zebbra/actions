@@ -66,6 +66,12 @@ def test_added_package_is_new():
     assert new_findings([finding(), added], base) == [added]
 
 
+def test_added_package_sharing_an_advisory_is_new():
+    base = [finding(package="@apollo/server", advisory="GHSA-x", ecosystem="npm")]
+    added = finding(package="@apollo/gateway", advisory="GHSA-x", ecosystem="npm")
+    assert new_findings([*base, added], base) == [added]
+
+
 def test_same_advisory_in_another_target_is_new():
     other = finding(target="python-graphql")
     assert new_findings([other], [finding()]) == [other]

@@ -183,6 +183,16 @@ def test_ignore_landed_first_applies_in_diff(repo):
     assert ids(report["ignored"]) == [("multidict", "CVE-2026-104874")]
 
 
+def test_ignore_added_for_pre_existing_finding_applies(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    write_config(repo, '[[ignore]]\nid = "GHSA-8988-9cw3-xx77"\nreason = "Not reachable."\n')
+    commit(repo)
+    code, report, _ = run("diff", "--base", base, tmp=repo)
+    assert code == 0
+    assert report["pre_existing"] == []
+    assert ids(report["ignored"]) == [("urllib3", "PYSEC-2026-4175")]
+
+
 def test_target_missing_at_base_counts_as_empty(repo):
     base = git(repo, "rev-parse", "HEAD")
     write_config(repo, '[[target]]\nname = "sdk"\necosystem = "uv"\npath = "sdk"\n')
@@ -332,3 +342,16 @@ def test_fix_commit_requires_clean_tree(repo, capsys):
     assert cli.main(["fix", "--commit"]) == 2
     assert "clean working tree" in capsys.readouterr().out
 
+
+def test_fix_commit_restores_lockfile_after_tool_error(repo, tmp_path, monkeypatch):
+    fix_repo(repo)
+
+    def edit_then_fail(target, root, findings, commit):
+        (Path(root) / target.lockfile).write_text("half-upgraded\n")
+        raise ToolError("uv lock failed")
+
+    monkeypatch.setattr(cli.BACKENDS["uv"], "fix", edit_then_fail)
+    issue = tmp_path.parent / "issue.md"
+    assert cli.main(["fix", "--commit", "--issue-body-out", str(issue)]) == 0
+    assert "uv lock failed" in issue.read_text()
+    assert git(repo, "status", "--porcelain") == ""

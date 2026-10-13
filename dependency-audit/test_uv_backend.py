@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -122,29 +123,29 @@ def test_export_failure_is_tool_error(monkeypatch, tmp_path):
         uv_backend.audit(TARGET, tmp_path, "runtime", tmp_path / "work")
 
 
-LOCK = """version = 1
-[[package]]
-name = "{name}"
-version = "{version}"
-"""
+def render_lock(versions):
+    return "version = 1\n" + "".join(
+        f'[[package]]\nname = "{name}"\nversion = "{version}"\n' for name, version in versions.items()
+    )
 
 
 class FakeLock:
-    """Answers `uv lock` by rewriting the lockfile per a scripted outcome and `uv tree` with dependents."""
+    """Answers `uv lock` by applying a scripted outcome to a multi-package lockfile and `uv tree` with dependents."""
 
-    def __init__(self, lockfile, outcomes):
+    def __init__(self, lockfile, versions, outcomes):
         self.lockfile = lockfile
-        self.outcomes = outcomes  # spec -> (returncode, resulting version or None)
+        self.outcomes = outcomes  # spec -> (returncode, {package: version} written to the lockfile)
         self.calls = []
+        lockfile.write_text(render_lock(versions))
 
     def __call__(self, cmd, cwd=None):
         self.calls.append(cmd)
         if cmd[:2] == ["uv", "lock"]:
             spec = cmd[cmd.index("--upgrade-package") + 1]
-            returncode, version = self.outcomes[spec]
-            if version:
-                name = spec.split("==")[0]
-                self.lockfile.write_text(LOCK.format(name=name, version=version))
+            returncode, changes = self.outcomes[spec]
+            if changes:
+                versions = {p["name"]: p["version"] for p in tomllib.loads(self.lockfile.read_text())["package"]}
+                self.lockfile.write_text(render_lock(versions | changes))
             return completed(returncode, "", "" if returncode == 0 else "No solution found")
         if cmd[:2] == ["uv", "tree"]:
             return completed(0, "django v4.2.30\n└── app v0.0.0 (group: prod)\n")
@@ -155,24 +156,55 @@ def pyjwt_findings():
     return [f for f in uv_backend.parse_pip_audit(recorded(), "backend") if f.package in ("pyjwt", "django")]
 
 
+def lock_repo(tmp_path, versions, outcomes, monkeypatch):
+    fake = FakeLock(tmp_path / "uv.lock", versions, outcomes)
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    monkeypatch.setattr(uv_backend, "run", fake)
+    return fake
+
+
+def changed_lines(tmp_path):
+    diff = git(tmp_path, "show", "--format=", "--unified=0", "HEAD", "--", "uv.lock").splitlines()
+    return [line for line in diff if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+
+
 def test_fix_falls_back_to_newest_allowed_then_blocks(monkeypatch, tmp_path):
     target = Target(name="backend", ecosystem="uv", path=".")
-    lockfile = tmp_path / "uv.lock"
-    lockfile.write_text(LOCK.format(name="django", version="4.2.30"))
-    fake = FakeLock(
-        lockfile,
+    fake = lock_repo(
+        tmp_path,
+        {"asgiref": "3.8.1", "django": "4.2.30", "pyjwt": "2.10.1"},
         {
             "django==5.2.17": (1, None),
-            "django": (0, "4.2.31"),  # resolves, but below the fix target
-            "pyjwt==2.15.0": (0, "2.15.0"),
+            "django": (0, {"django": "4.2.31"}),  # resolves, but below the fix target
+            "pyjwt==2.15.0": (0, {"pyjwt": "2.15.0"}),
         },
+        monkeypatch,
     )
-    monkeypatch.setattr(uv_backend, "run", fake)
-    blocked = uv_backend.fix(target, tmp_path, pyjwt_findings(), commit=False)
+    blocked = uv_backend.fix(target, tmp_path, pyjwt_findings(), commit=True)
     assert blocked == {"django": "required by app v0.0.0 (group: prod)"}
     specs = [c[c.index("--upgrade-package") + 1] for c in fake.calls if c[:2] == ["uv", "lock"]]
     assert specs == ["django==5.2.17", "django", "pyjwt==2.15.0"]
-    assert uv_backend.installed(target, tmp_path) == {"pyjwt": ["2.15.0"]}
+    assert uv_backend.installed(target, tmp_path) == {"asgiref": ["3.8.1"], "django": ["4.2.30"], "pyjwt": ["2.15.0"]}
+    assert changed_lines(tmp_path) == ['-version = "2.10.1"', '+version = "2.15.0"']
+    assert git(tmp_path, "rev-list", "--count", "HEAD") == "2\n"
+
+
+def test_fix_discards_a_pinned_attempt_that_falls_short(monkeypatch, tmp_path):
+    target = Target(name="backend", ecosystem="uv", path=".")
+    lock_repo(
+        tmp_path,
+        {"asgiref": "3.8.1", "django": "4.2.30"},
+        {
+            "django==5.2.17": (0, {"asgiref": "3.9.0", "django": "4.2.31"}),  # one split stays below the target
+            "django": (0, {"django": "5.2.17"}),
+        },
+        monkeypatch,
+    )
+    django = [f for f in pyjwt_findings() if f.package == "django"]
+    assert uv_backend.fix(target, tmp_path, django, commit=True) == {}
+    assert changed_lines(tmp_path) == ['-version = "4.2.30"', '+version = "5.2.17"']
 
 
 DJANGO_CONFLICT = """Using CPython 3.12.7
