@@ -343,6 +343,16 @@ def test_fix_commit_requires_clean_tree(repo, capsys):
     assert "clean working tree" in capsys.readouterr().out
 
 
+def test_fix_commit_refuses_to_leave_uncommitted_changes(repo, capsys, monkeypatch):
+    def stray_file(target, root, findings, commit):
+        (Path(root) / "backend/.cache").write_text("x\n")
+        return {}
+
+    monkeypatch.setattr(cli.BACKENDS["uv"], "fix", stray_file)
+    assert cli.main(["fix", "--commit"]) == 2
+    assert "fix --commit left uncommitted changes: backend/.cache" in capsys.readouterr().out
+
+
 def test_fix_commit_restores_lockfile_after_tool_error(repo, tmp_path, monkeypatch):
     fix_repo(repo)
 

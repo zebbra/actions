@@ -125,8 +125,9 @@ Keep `mode: full` explicit there: `auto` maps `workflow_dispatch` to `fix`.
    blocked and unfixable findings, stale ignores and tool errors; it is closed when empty. The action creates the
    `dependency-audit` and `pr-security` labels when they are missing (colours as in project-infrastructure).
 
-Bot commits touch lockfiles only; the CLI refuses to commit when anything else changed. Ignore entries,
-`pyproject.toml` and `package.json` are never edited.
+Bot commits touch lockfiles only; the CLI refuses to commit when anything else changed, and exits 2 when the run
+leaves any uncommitted change, because the PR step would commit it. Ignore entries, `pyproject.toml` and
+`package.json` are never edited.
 
 Reports carry ids, advisory links, package names and versions only. Advisory titles and descriptions are left out,
 and `@` and `#` are escaped, so nothing mentions people or cross-links issues. Bodies are capped at 65536 characters.

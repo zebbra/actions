@@ -30,7 +30,7 @@ from .model import (
     unused_ignores,
     version_key,
 )
-from .proc import GuardError, log, require_clean
+from .proc import GuardError, changed_paths, log, require_clean
 from .render import Row, diff_summary, full_summary, issue_body, pr_body, skipped_summary
 
 BACKENDS = {"uv": uv_backend, "npm": npm_backend}
@@ -269,6 +269,9 @@ def cmd_fix(args: argparse.Namespace, root: Path, out: Output) -> int:
         if args.dry_run:
             for lockfile, content in snapshots.items():
                 (root / lockfile).write_bytes(content)
+    # The action's create-pull-request step commits whatever is left in the tree, so only the bot's commits may remain.
+    if args.commit and (left := changed_paths(root)):
+        raise GuardError("fix --commit left uncommitted changes: " + ", ".join(left))
 
     fixed = [
         f for t in targets if t.name in post for f in pre[t.name] if not any(f.same_advisory(p) for p in post[t.name])
